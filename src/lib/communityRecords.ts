@@ -40,15 +40,13 @@ export async function deleteCommunityRecord(id: string) {
 import { supabase } from "./supabase";
 
 export async function getCommunityRecords() {
-  const { data, error } = await supabase
-    .from("community_records")
-    .select("*");
+  const { data, error } = await supabase?.from("community_records")?.select("*");
 
   console.log("DATA =", data);
   console.log("ERROR =", error);
 
   if (error) {
-    alert(error.message);
+    alert(error?.message);
   }
 
   return data ?? [];

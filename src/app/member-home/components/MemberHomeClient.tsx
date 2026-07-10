@@ -1,6 +1,6 @@
 'use client';
 import { supabase } from "../../../lib/supabase";
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bell,
@@ -37,19 +37,14 @@ import {
 import GroupPanel from './GroupPanel';
 import VisitRecommendation from './VisitRecommendation';
 import NotificationFeed from './NotificationFeed';
-/*import { supabase } from "../../../lib/supabase";
 
-useEffect(() => {
-  supabase.auth.getSession().then(({ data, error }) => {
-    console.log("SESSION:", data.session);
-    console.log("SESSION ERROR:", error);
-  });
-}, []);*/
-//import { useRouter } from "next/navigation";
-//import { useEffect } from "react";
+const ALERT_DURATION_SECONDS = 4 * 60; // 4 minutes
 
-// Simulated current user — in real app loaded from localStorage/session
-// BACKEND INTEGRATION POINT: Load from localStorage or session API
+function getSecondsRemaining(createdAt: string): number {
+  const created = new Date(createdAt).getTime();
+  const expiresAt = created + ALERT_DURATION_SECONDS * 1000;
+  return Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+}
 
 function toMemberHomeAlert(row: any, currentMember: any, members: any[]): Alert {
   const sender =
@@ -80,14 +75,11 @@ export default function MemberHomeClient() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const storedUser = localStorage.getItem('cv_user');
-
     if (!storedUser) {
       router.replace('/');
       return;
     }
-
     setCurrentMember(JSON.parse(storedUser));
   }, [router]);
 
@@ -97,44 +89,29 @@ export default function MemberHomeClient() {
     async function loadMembers() {
       try {
         const members = await getApprovedProfilesByGender(currentMember.gender);
-
         setSameGenderMembers(members.filter((m: any) => m.id !== currentMember.id));
       } catch (err) {
         console.error(err);
       }
     }
-
     loadMembers();
 
     async function loadCommunityRecords() {
       try {
         const records = await getCommunityRecordsByGender(currentMember.gender);
-
         const formatted = records.map((r: any) => ({
           ...r,
           area: r.areas?.name ?? '',
           visitCount: r.visit_count,
           lastVisitedDate: r.last_visited_date,
         }));
-
         setCommunityRecords(formatted);
       } catch (err) {
         console.error(err);
       }
     }
-
     loadCommunityRecords();
   }, [currentMember]);
-
-  /*function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}*/
 
   const [activeTab, setActiveTab] = useState<'home' | 'group' | 'notifications'>('home');
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -144,16 +121,39 @@ export default function MemberHomeClient() {
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [groupFormed, setGroupFormed] = useState(false);
   const [recommendedPerson, setRecommendedPerson] = useState<CommunityRecord | null>(null);
-  const [countdown, setCountdown] = useState<number>(0);
   const [logoutModal, setLogoutModal] = useState(false);
   const [beeping, setBeeping] = useState(false);
-  const countdownRef = useRef<NodeJS.Timeout | null>(null);
   const beepRef = useRef<NodeJS.Timeout | null>(null);
   const [myAlert, setMyAlert] = useState<any>(null);
   const [acceptedMembers, setAcceptedMembers] = useState<any[]>([]);
-  const [myCountdown, setMyCountdown] = useState(0);
   const [respondedAlerts, setRespondedAlerts] = useState<string[]>([]);
 
+  // Separate countdown states: one for my outgoing alert, one for incoming alert
+  const [myAlertCountdown, setMyAlertCountdown] = useState(0);
+  const [incomingAlertCountdown, setIncomingAlertCountdown] = useState(0);
+  const myCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const incomingCountdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Derived: active incoming alert (same area + gender, not mine)
+  const incomingAlert = currentMember
+    ? alerts.find(
+        (a) =>
+          a.status === 'active' &&
+          a.senderId !== currentMember.id &&
+          a.gender === currentMember.gender
+      )
+    : undefined;
+
+  // Derived: my own active alert
+  const myActiveAlert = currentMember
+    ? alerts.find(
+        (a) =>
+          a.status === 'active' &&
+          a.senderId === currentMember.id
+      )
+    : undefined;
+
+  // Load alert history on mount
   useEffect(() => {
     if (!currentMember) return;
 
@@ -163,166 +163,183 @@ export default function MemberHomeClient() {
         const mappedAlerts = history.map((alert) =>
           toMemberHomeAlert(alert, currentMember, sameGenderMembers)
         );
-
         setAlerts(mappedAlerts);
-        setHasActiveAlert(
-          mappedAlerts.some(
-            (alert) => alert.status === 'active' && alert.senderId === currentMember.id
-          )
+
+        const myActive = mappedAlerts.find(
+          (a) => a.status === 'active' && a.senderId === currentMember.id
         );
+        setHasActiveAlert(!!myActive);
+
+        // Restore myAlert raw row for accepted members tracking
+        if (myActive) {
+          const rawRow = history.find((r: any) => r.id === myActive.id);
+          if (rawRow) setMyAlert(rawRow);
+        }
       } catch (err) {
         console.error(err);
       }
     }
-
     loadAvailabilityRequests();
   }, [currentMember, sameGenderMembers]);
 
+  // Countdown for MY outgoing alert — calculated from alert's created_at
   useEffect(() => {
-    if (!currentMember) return;
+    if (myCountdownRef.current) clearInterval(myCountdownRef.current);
 
-    return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
-      const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
+    if (!myActiveAlert) {
+      setMyAlertCountdown(0);
+      return;
+    }
 
-      setAlerts((prev) => [mappedAlert, ...prev.filter((alert) => alert.id !== mappedAlert.id)]);
-
-      if (soundEnabled) {
-        setBeeping(true);
-        beepRef.current = setTimeout(() => setBeeping(false), 5000);
-      }
-    });
-  }, [currentMember, sameGenderMembers, soundEnabled]);
-
-  // Active alert for this gender
-  const myActiveAlert = currentMember
-  ? alerts.find(
-      (a) =>
-        a.status === "active" &&
-        a.senderId === currentMember.id
-    )
-  : undefined;
-
-const incomingAlert = currentMember
-  ? alerts.find(
-      (a) =>
-        a.status === "active" &&
-        a.senderId !== currentMember.id &&
-        a.gender === currentMember.gender
-    )
-  : undefined;
-
-  // Countdown timer for active alert
-  useEffect(() => {
-   if (!myActiveAlert) return;
-    const expiry = new Date(myActiveAlert.expiresAt).getTime();
     const tick = () => {
-      const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
-      setCountdown(remaining);
+      const remaining = getSecondsRemaining(myActiveAlert.sentAt);
+      setMyAlertCountdown(remaining);
       if (remaining === 0) {
+        if (myCountdownRef.current) clearInterval(myCountdownRef.current);
         updateAlertStatus(myActiveAlert.id, 'expired').catch(console.error);
         setAlerts((prev) =>
           prev.map((a) => (a.id === myActiveAlert.id ? { ...a, status: 'expired' } : a))
         );
         setHasActiveAlert(false);
+        setMyAlert(null);
       }
     };
     tick();
-    countdownRef.current = setInterval(tick, 1000);
+    myCountdownRef.current = setInterval(tick, 1000);
     return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (myCountdownRef.current) clearInterval(myCountdownRef.current);
     };
-  }, [myActiveAlert?.id]);
+  }, [myActiveAlert?.id, myActiveAlert?.sentAt]);
 
+  // Countdown for INCOMING alert — calculated from alert's created_at (consistent after refresh)
   useEffect(() => {
-  if (!myAlert) return;
+    if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
 
-  const expiry = new Date(
-    getAvailabilityExpiresAt(myAlert.created_at)
-  ).getTime();
-
-  const interval = setInterval(() => {
-    const remaining = Math.max(
-      0,
-      Math.floor((expiry - Date.now()) / 1000)
-    );
-
-    setMyCountdown(remaining);
-
-    if (remaining === 0) {
-      clearInterval(interval);
+    if (!incomingAlert) {
+      setIncomingAlertCountdown(0);
+      return;
     }
-  }, 1000);
 
-  return () => clearInterval(interval);
+    const tick = () => {
+      const remaining = getSecondsRemaining(incomingAlert.sentAt);
+      setIncomingAlertCountdown(remaining);
+      if (remaining === 0) {
+        if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
+        // Mark as expired locally
+        setAlerts((prev) =>
+          prev.map((a) => (a.id === incomingAlert.id ? { ...a, status: 'expired' } : a))
+        );
+      }
+    };
+    tick();
+    incomingCountdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
+    };
+  }, [incomingAlert?.id, incomingAlert?.sentAt]);
 
-}, [myAlert]);
+  // Real-time subscription for new alerts (same area + gender)
+  useEffect(() => {
+    if (!currentMember) return;
+
+    return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+      const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
+      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
+
+      if (soundEnabled) {
+        setBeeping(true);
+        if (beepRef.current) clearTimeout(beepRef.current);
+        beepRef.current = setTimeout(() => setBeeping(false), 5000);
+      }
+    });
+  }, [currentMember, sameGenderMembers, soundEnabled]);
+
+  // Real-time subscription for alert_responses on MY alert
+  useEffect(() => {
+    if (!currentMember || !myAlert) return;
+
+    const channel = supabase
+      .channel(`responses-${myAlert.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'alert_responses',
+          filter: `alert_id=eq.${myAlert.id}`,
+        },
+        async () => {
+          try {
+            const accepted = await getAcceptedMembers(myAlert.id);
+            setAcceptedMembers(accepted);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+      )
+      .subscribe();
+
+    // Load initial accepted members
+    getAcceptedMembers(myAlert.id)
+      .then(setAcceptedMembers)
+      .catch(console.error);
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [myAlert?.id]);
+
+  // Real-time subscription for alert status changes (e.g., expired by another client)
+  useEffect(() => {
+    if (!currentMember) return;
+
+    const channel = supabase
+      .channel(`alert-status-${currentMember.area_id}-${currentMember.gender}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'alerts',
+        },
+        (payload) => {
+          const updated = payload.new as any;
+          if (
+            updated.area_id === currentMember.area_id &&
+            updated.gender === currentMember.gender
+          ) {
+            setAlerts((prev) =>
+              prev.map((a) => (a.id === updated.id ? { ...a, status: updated.status } : a))
+            );
+            if (updated.sender_id === currentMember.id && updated.status !== 'active') {
+              setHasActiveAlert(false);
+              setMyAlert(null);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentMember]);
 
   useEffect(() => {
     return () => {
       if (beepRef.current) clearTimeout(beepRef.current);
+      if (myCountdownRef.current) clearInterval(myCountdownRef.current);
+      if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
     };
   }, []);
 
-useEffect(() => {
-  if (!currentMember) return;
-
-  const channel = supabase
-    .channel("member-alerts")
-
-    // New alert created
-    .on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "alerts",
-      },
-      (payload) => {
-        console.log("NEW ALERT", payload);
-
-        // We'll improve this later.
-      }
-    )
-
-    // Someone accepted / declined
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "alert_responses",
-      },
-      async (payload) => {
-  if (!myAlert) return;
-
-  const response = payload.new as any;
-
-  if (response.alert_id !== myAlert.id) return;
-
-  const accepted = await getAcceptedMembers(myAlert.id);
-
-  console.log("Accepted Members:", accepted);
-
-  setAcceptedMembers(accepted);
-}
-    )
-
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [currentMember]);
-
   const handleSendAlert = async () => {
     if (!currentMember) return;
-
     setIsSendingAlert(true);
-
     try {
       const result = await createAlert(currentMember);
       const alert = toMemberHomeAlert(result.alert, currentMember, sameGenderMembers);
-        setMyAlert(result.alert);
+      setMyAlert(result.alert);
       setAlerts((prev) => [alert, ...prev.filter((item) => item.id !== alert.id)]);
 
       if (result.created) {
@@ -341,51 +358,29 @@ useEffect(() => {
 
   const handleAcceptAlert = async (alertId: string) => {
     if (!currentMember) return;
-
     try {
       await acknowledgeAlert(alertId, currentMember.id, 'accepted');
       setRespondedAlerts((prev) => [...prev, alertId]);
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a
+        )
+      );
+      toast.success('Accepted! Waiting for other members...');
     } catch (err) {
-      console.error('Unable to accept availability request', {
-        alertId,
-        memberId: currentMember.id,
-        error: err,
-      });
+      console.error('Unable to accept availability request', { alertId, memberId: currentMember.id, error: err });
       toast.error('Unable to accept availability request');
-      return;
     }
-
-    setAlerts((prev) =>
-    prev.map((a) =>
-    a.id === alertId
-      ? {
-          ...a,
-          acceptedBy: [...a.acceptedBy, currentMember.id],
-        }
-      : a
-  )
-);
-
-toast.success("Accepted! Waiting for other members...");
-
-   
-    toast.success('Group formed! Visit recommendation ready.');
   };
 
   const handleIgnoreAlert = async (alertId: string) => {
     if (!currentMember) return;
-
     try {
       await acknowledgeAlert(alertId, currentMember.id, 'declined');
       setRespondedAlerts((prev) => [...prev, alertId]);
-      setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a } : a)));
-      toast("Availability request ignored");
-      } catch (err) {
-      console.error('Unable to decline availability request', {
-        alertId,
-        memberId: currentMember.id,
-        error: err,
-      });
+      toast('Availability request ignored');
+    } catch (err) {
+      console.error('Unable to decline availability request', { alertId, memberId: currentMember.id, error: err });
       toast.error('Unable to ignore availability request');
     }
   };
@@ -397,6 +392,8 @@ toast.success("Accepted! Waiting for other members...");
   };
 
   if (!currentMember) return null;
+
+  const showIncomingBanner = !!incomingAlert && incomingAlert.status === 'active' && incomingAlertCountdown > 0;
 
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-lg mx-auto">
@@ -455,8 +452,8 @@ toast.success("Accepted! Waiting for other members...");
         </div>
       </header>
 
-      {/* Active Alert Banner */}
-      {incomingAlert && incomingAlert.status === "active" && countdown > 0 && (
+      {/* Incoming Alert Banner — shown to receivers */}
+      {showIncomingBanner && (
         <div className="alert-pulse border-b border-warning/30 px-4 py-3">
           <div className="flex items-start gap-3">
             <div
@@ -466,37 +463,45 @@ toast.success("Accepted! Waiting for other members...");
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-foreground">
-                {incomingAlert.senderName} is available!
+                {incomingAlert!.senderName} is available!
               </p>
               <p className="text-xs text-muted-foreground">
-                {incomingAlert.senderArea} · {incomingAlert.senderSociety}
+                {incomingAlert!.senderArea}
+                {incomingAlert!.senderSociety ? ` · ${incomingAlert!.senderSociety}` : ''}
               </p>
               <div className="flex items-center gap-1.5 mt-1">
                 <Clock size={12} className="text-warning" />
                 <span className="text-xs font-bold text-warning tabular-nums">
-                  {formatCountdown(countdown)} remaining
+                  {formatCountdown(incomingAlertCountdown)} remaining
                 </span>
               </div>
             </div>
-           {incomingAlert && !respondedAlerts.includes(incomingAlert.id) && (
-  <div className="flex gap-1.5 flex-shrink-0">
-    <button
-      onClick={() => handleAcceptAlert(incomingAlert.id)}
-      className="flex items-center gap-1 px-2.5 py-1.5 bg-success text-success-foreground rounded-xl text-xs font-bold hover:bg-success/90 active:scale-95 transition-all"
-    >
-      <CheckCircle size={13} />
-      Accept
-    </button>
-
-    <button
-      onClick={() => handleIgnoreAlert(incomingAlert.id)}
-      className="flex items-center gap-1 px-2.5 py-1.5 bg-muted text-muted-foreground rounded-xl text-xs font-bold hover:bg-muted/70 transition-colors"
-    >
-      <XCircle size={13} />
-      Ignore
-    </button>
-  </div>
-)}
+            {!respondedAlerts.includes(incomingAlert!.id) && (
+              <div className="flex gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => handleAcceptAlert(incomingAlert!.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-success text-success-foreground rounded-xl text-xs font-bold hover:bg-success/90 active:scale-95 transition-all"
+                >
+                  <CheckCircle size={13} />
+                  Accept
+                </button>
+                <button
+                  onClick={() => handleIgnoreAlert(incomingAlert!.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-muted text-muted-foreground rounded-xl text-xs font-bold hover:bg-muted/70 transition-colors"
+                >
+                  <XCircle size={13} />
+                  Ignore
+                </button>
+              </div>
+            )}
+            {respondedAlerts.includes(incomingAlert!.id) && (
+              <div className="flex-shrink-0">
+                <span className="text-xs text-success font-semibold flex items-center gap-1">
+                  <CheckCircle size={13} />
+                  Responded
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -529,13 +534,12 @@ toast.success("Accepted! Waiting for other members...");
                   <>
                     <Clock size={24} />
                     Alert Sent — Waiting...
-                    <p className="text-sm">
-Time Left : {formatCountdown(myCountdown)}
-</p>
-
-<p className="text-sm mt-2">
-Accepted : {acceptedMembers.length}
-</p>
+                    <p className="text-sm tabular-nums">
+                      Time Left: {formatCountdown(myAlertCountdown)}
+                    </p>
+                    <p className="text-sm mt-1">
+                      Accepted: {acceptedMembers.length}
+                    </p>
                   </>
                 ) : (
                   <>
@@ -569,7 +573,7 @@ Accepted : {acceptedMembers.length}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground pl-5 tabular-nums">
-                  📍 📍 {currentMember.society}, House {currentMember.house_no}
+                  📍 {currentMember.society}, House {currentMember.house_no}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground mt-2">
@@ -604,7 +608,7 @@ Accepted : {acceptedMembers.length}
               <AlertCircle size={16} className="text-primary flex-shrink-0 mt-0.5" />
               <p className="text-xs text-primary/80">
                 You are in the <strong>{currentMember.gender}</strong> section. You will only
-                receive alerts from and connect with {currentMember.gender.toLowerCase()} members.
+                receive alerts from and connect with {currentMember.gender.toLowerCase()} members in your area.
               </p>
             </div>
           </div>
@@ -656,7 +660,7 @@ Accepted : {acceptedMembers.length}
               id: 'notifications',
               label: 'Alerts',
               icon: <Bell size={20} />,
-              badge: incomingAlert && countdown > 0,
+              badge: showIncomingBanner,
             },
           ].map((tab) => (
             <button
@@ -664,8 +668,7 @@ Accepted : {acceptedMembers.length}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
               className={`flex-1 flex flex-col items-center gap-1 py-3 text-xs font-medium transition-colors relative ${
                 activeTab === tab.id
-                  ? 'text-primary'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? 'text-primary' :'text-muted-foreground hover:text-foreground'
               }`}
             >
               <span className="relative">
@@ -698,7 +701,7 @@ Accepted : {acceptedMembers.length}
             </button>
             <button
               onClick={() => setLogoutModal(false)}
-              className="flex-1 py-2.5bg-muted text-foreground rounded-xl text-sm font-semibold hover:bg-muted/70 transition-colors"
+              className="flex-1 py-2.5 bg-muted text-foreground rounded-xl text-sm font-semibold hover:bg-muted/70 transition-colors"
             >
               Cancel
             </button>

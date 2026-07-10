@@ -36,7 +36,7 @@ export default function RootLayout({
         {children}
         <Toaster position="bottom-center" richColors />
 
-        <script type="module" async src="https://static.rocket.new/rocket-web.js?_cfg=https%3A%2F%2Fcommunityv1582back.builtwithrocket.new&_be=https%3A%2F%2Fappanalytics.rocket.new&_v=0.1.19" />
+        <script type="module" async src="https://static.rocket.new/rocket-web.js?_cfg=https%3A%2F%2Ffinshipapp2167back.builtwithrocket.new&_be=https%3A%2F%2Fappanalytics.rocket.new&_v=0.1.19" />
         <script type="module" defer src="https://static.rocket.new/rocket-shot.js?v=0.0.2" /></body>
     </html>
   );

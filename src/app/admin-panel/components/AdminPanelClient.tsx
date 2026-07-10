@@ -5,25 +5,16 @@ import AddPersonModal, { AddPersonForm } from "./AddPersonModal";
 import { getAreas } from "../../../lib/services/areas";
 
 import { useRouter } from 'next/navigation';
-import { Users, ClipboardList, History, MapPin, BarChart2, LogOut, Menu, X, CheckCircle, XCircle, Plus, Edit2, Trash2, Bell, Shield, AlertTriangle, Calendar } from 'lucide-react';
+import { Users, ClipboardList, History, MapPin, BarChart2, LogOut, Menu, X, CheckCircle, Plus, Edit2, Trash2, Shield, AlertTriangle, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '../../../components/ui/Badge';
 import Modal from '../../../components/ui/Modal';
-import {
-  mockMembers,
-  mockVisitRecords
-} from "../../../lib/mockData";
+import { mockVisitRecords } from "../../../lib/mockData";
 
 import MarkVisitedModal from './MarkVisitedModal';
 import AdminReports from './AdminReports';
 
-import {
-  getCommunityRecords,
-  addCommunityRecord,
-  updateCommunityRecord,
-  deleteCommunityRecord,
-  markCommunityRecordVisited
-} from "../../../lib/services/community";
+import { getCommunityRecords, addCommunityRecord, updateCommunityRecord, markCommunityRecordVisited } from "../../../lib/services/community";
 
 import {
   getPendingProfiles,
@@ -31,6 +22,10 @@ import {
   approveProfile,
   rejectProfile
 } from "../../../lib/services/profile";
+import { CommunityRecord, Gender } from '@/lib/mockData';
+import AddRecordModal from '@/app/admin-panel/components/AddRecordModal';
+
+
 
 type NavSection = 'approvals' | 'records' | 'history' | 'members' | 'reports';
 
@@ -48,8 +43,7 @@ export default function AdminPanelClient() {
   }
 }, [router]);
 
-const admin = typeof window !== "undefined"
-  ? localStorage.getItem("cv_admin")
+const admin = typeof window !== "undefined" ? localStorage.getItem("cv_admin")
   : null;
 
 if (!admin) return null;
@@ -297,8 +291,19 @@ const handleReject = async (memberId: string) => {
 
   const handleEditRecord = (updated: CommunityRecord) => {
     setCommunityRecords((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-    setEditRecord(null);
+    setEditingPerson(null);
     toast.success('Record updated successfully');
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    try {
+      setCommunityRecords((prev) => prev.filter((r) => r.id !== id));
+      setDeleteConfirmId(null);
+      toast.success('Record deleted successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error('Unable to delete record');
+    }
   };
 
   const priorityBadge = (p: CommunityRecord['priority']) => {

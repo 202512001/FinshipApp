@@ -1,9 +1,7 @@
 import { supabase } from "@/lib/supabase";
 
 export default async function TestPage() {
-  const { data, error } = await supabase
-    .from("areas")
-    .select("*");
+  const { data, error } = await supabase?.from("areas")?.select("*");
 
   return (
     <div style={{ padding: 20 }}>

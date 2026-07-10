@@ -2,10 +2,7 @@ import { supabase } from "../supabase";
 
 export type AvailabilityGender = "Male" | "Female";
 export type AvailabilityStatus =
-  | "active"
-  | "expired"
-  | "grouped"
-  | "cancelled";
+  | "active" |"expired" |"grouped" |"cancelled";
 
 export type AvailabilityResponse = "accepted" | "declined";
 

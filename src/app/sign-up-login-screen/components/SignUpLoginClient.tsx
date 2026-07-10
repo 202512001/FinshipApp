@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { loginUser } from "../../../lib/services/profile";
-import { Eye, EyeOff, Phone, User, MapPin, Lock, Shield, Copy, Check, Users, ChevronRight } from 'lucide-react';
+import { Eye, EyeOff, Phone, User, Lock, Shield, Copy, Check, Users, ChevronRight } from 'lucide-react';
 import AppLogo from '../../../components/ui/AppLogo';
 import Modal from '../../../components/ui/Modal';
 import {
