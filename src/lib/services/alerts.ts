@@ -319,3 +319,144 @@ export function subscribeToAlertResponses(
     supabase.removeChannel(channel);
   };
 }
+
+//claude
+export async function formGroup(alertId: string, senderId: string): Promise<string | null> {
+  // 1. Check if group already exists for this alert
+  const { data: existingGroup } = await supabase
+    .from('groups')
+    .select('id')
+    .eq('alert_id', alertId)
+    .maybeSingle();
+
+  if (existingGroup) return existingGroup.id;
+
+  // 2. Get all accepted members (excluding sender)
+  const { data: responses, error: respError } = await supabase
+    .from('alert_responses')
+    .select('member_id')
+    .eq('alert_id', alertId)
+    .eq('response', 'accepted');
+
+  if (respError) throw respError;
+
+  const acceptedMemberIds: string[] = (responses ?? []).map((r: any) => r.member_id);
+
+  // 3. If nobody accepted → expire the alert, return null
+  if (acceptedMemberIds.length === 0) {
+    await supabase
+      .from('alerts')
+      .update({ status: 'expired' })
+      .eq('id', alertId);
+    return null;
+  }
+
+  // 4. Include sender + accepted members
+  const allMemberIds = [senderId, ...acceptedMemberIds.filter((id) => id !== senderId)];
+
+  // 5. Create group row
+  const { data: group, error: groupError } = await supabase
+    .from('groups')
+    .insert({
+      alert_id: alertId,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (groupError) throw groupError;
+
+  // 6. Insert all members into group_members
+  const memberRows = allMemberIds.map((memberId) => ({
+    group_id: group.id,
+    member_id: memberId,
+    joined_at: new Date().toISOString(),
+  }));
+
+  const { error: membersError } = await supabase
+    .from('group_members')
+    .insert(memberRows);
+
+  if (membersError) throw membersError;
+
+  // 7. Update alert status to grouped
+  await supabase
+    .from('alerts')
+    .update({ status: 'grouped' })
+    .eq('id', alertId);
+
+  return group.id;
+}
+
+export async function getGroupWithMembers(groupId: string) {
+  const { data, error } = await supabase
+    .from('group_members')
+    .select(`
+      member_id,
+      profiles!group_members_member_id_fkey(
+        id,
+        name,
+        society,
+        gender,
+        area_id,
+        areas(name)
+      )
+    `)
+    .eq('group_id', groupId);
+
+  if (error) throw error;
+  return (data ?? []).map((row: any) => row.profiles).filter(Boolean);
+}
+
+export async function getMyActiveGroup(memberId: string) {
+  const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('group_members')
+    .select(`
+      group_id,
+      groups!group_members_group_id_fkey(
+        id,
+        alert_id,
+        status,
+        created_at
+      )
+    `)
+    .eq('member_id', memberId)
+    .gte('joined_at', eightHoursAgo)
+    .order('joined_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? (data as any).groups : null;
+}
+
+export function subscribeToGroupFormed(
+  alertId: string,
+  callback: (groupId: string) => void
+) {
+  const channelName = `group-formed-${alertId}-${Date.now()}`;
+  
+  const channel = supabase
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'groups',
+      },
+      (payload) => {
+             const group = payload.new as any;
+        if (group.alert_id === alertId) {
+          callback(group.id);
+        }
+      }
+    )
+    .subscribe((status) => {
+      });
+
+  return () => supabase.removeChannel(channel);
+}

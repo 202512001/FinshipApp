@@ -73,6 +73,22 @@ Build the application for production:
   npm run build
   ```
 
+  ## ⚠️ Security Notice
+
+If you cloned this repository before July 2026, rotate these immediately:
+- Supabase anon key (Supabase dashboard → Settings → API → Regenerate)
+- Admin panel password (run UPDATE in Supabase SQL editor)
+- Any demo PINs used by test accounts
+
+## Environment Setup
+
+Copy `.env.example` to `.env.local` and fill in your values:
+\`\`\`
+cp .env.example .env.local
+\`\`\`
+
+Never commit `.env.local` to git.
+
 ## 📚 Learn More
 
 To learn more about Next.js, take a look at the following resources:
@@ -87,5 +103,3 @@ You can check out the [Next.js GitHub repository](https://github.com/vercel/next
 - Built with [Rocket.new](https://rocket.new)
 - Powered by Next.js and React
 - Styled with Tailwind CSS
-
-Built with ❤️ on Rocket.new

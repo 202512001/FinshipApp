@@ -4,7 +4,6 @@ import dynamic from 'next/dynamic';
 import { Award, AlertTriangle } from 'lucide-react';
 import { type CommunityRecord, type VisitRecord, type Gender } from '../../../lib/mockData';
 
-const VisitsBarChart = dynamic(() => import('./charts/VisitsBarChart'), { ssr: false });
 const VisitTrendChart = dynamic(() => import('./charts/VisitTrendChart'), { ssr: false });
 
 interface Props {
@@ -21,15 +20,15 @@ export default function AdminReports({ communityRecords, visitRecords, adminGend
   const neverVisited = filtered.filter((r) => r.visitCount === 0);
   const leastVisited = [...filtered].sort((a, b) => a.visitCount - b.visitCount).slice(0, 3);
   const mostVisited = [...filtered].sort((a, b) => b.visitCount - a.visitCount).slice(0, 3);
-  const highPriority = filtered.filter((r) => r.priority === 'high');
+  //nst highPriority = filtered.filter((r) => r.priority === 'high');
 
-  const areaData = filtered.reduce<Record<string, number>>((acc, r) => {
+  /*const areaData = filtered.reduce<Record<string, number>>((acc, r) => {
     const key = r.area.split(' - ')[1] || r.area;
     acc[key] = (acc[key] || 0) + r.visitCount;
     return acc;
   }, {});
 
-  const barData = Object.entries(areaData).map(([area, visits]) => ({ area, visits }));
+  const barData = Object.entries(areaData).map(([area, visits]) => ({ area, visits }));*/
 
   return (
     <div className="space-y-5 fade-in">
@@ -45,11 +44,7 @@ export default function AdminReports({ communityRecords, visitRecords, adminGend
           <p className="text-3xl font-bold text-destructive tabular-nums">{neverVisited.length}</p>
           <p className="text-xs text-muted-foreground mt-1">Need first visit</p>
         </div>
-        <div className="bg-card border border-warning/20 rounded-2xl p-4">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">High Priority</p>
-          <p className="text-3xl font-bold text-warning tabular-nums">{highPriority.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">Urgent attention needed</p>
-        </div>
+        
         <div className="bg-card border border-success/20 rounded-2xl p-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Active Members</p>
           <p className="text-3xl font-bold text-success tabular-nums">7</p>
@@ -57,17 +52,11 @@ export default function AdminReports({ communityRecords, visitRecords, adminGend
         </div>
       </div>
 
-      {/* Charts Row */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-card border border-border rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-foreground mb-3">Visits by Area</h3>
-          <VisitsBarChart data={barData} />
-        </div>
-        <div className="bg-card border border-border rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-foreground mb-3">Monthly Visit Trend</h3>
-          <VisitTrendChart />
-        </div>
-      </div>
+      <div className="bg-card border border-border rounded-2xl p-4">
+  <h3 className="text-sm font-semibold text-foreground mb-3">Monthly Visit Trend</h3>
+  <VisitTrendChart />
+</div>
+      
 
       {/* Least + Most Visited */}
       <div className="grid sm:grid-cols-2 gap-4">

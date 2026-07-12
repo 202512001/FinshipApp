@@ -19,12 +19,16 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Lock, Eye, EyeOff } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { verifyAdminPassword } from '../../../lib/services/adminAuth';
 import Badge from '../../../components/ui/Badge';
 import Modal from '../../../components/ui/Modal';
 import AppLogo from '../../../components/ui/AppLogo';
 import { type Member, type Alert, type CommunityRecord } from '../../../lib/mockData';
 import { getCommunityRecordsByGender } from '../../../lib/services/community';
 import { getApprovedProfilesByGender } from '../../../lib/services/profile';
+//claude
 import {
   acknowledgeAlert,
   createAlert,
@@ -32,13 +36,20 @@ import {
   getAvailabilityExpiresAt,
   subscribeToNewAvailabilityAlerts,
   updateAlertStatus,
-  getAcceptedMembers
+  getAcceptedMembers,
+  formGroup,
+  getGroupWithMembers,
+  getMyActiveGroup,
+  subscribeToGroupFormed,
 } from '../../../lib/services/alerts';
+import GroupSuggestions from './GroupSuggestions';
+//-------------------
 import GroupPanel from './GroupPanel';
 import VisitRecommendation from './VisitRecommendation';
 import NotificationFeed from './NotificationFeed';
+import { deleteMyAccount } from '../../../lib/services/profile';
 
-const ALERT_DURATION_SECONDS = 4 * 60; // 4 minutes
+const ALERT_DURATION_SECONDS = 20; // 4 minutes
 
 function getSecondsRemaining(createdAt: string): number {
   const created = new Date(createdAt).getTime();
@@ -127,6 +138,20 @@ export default function MemberHomeClient() {
   const [myAlert, setMyAlert] = useState<any>(null);
   const [acceptedMembers, setAcceptedMembers] = useState<any[]>([]);
   const [respondedAlerts, setRespondedAlerts] = useState<string[]>([]);
+  //claude
+  const [groupPopupVisible, setGroupPopupVisible] = useState(false);
+const [formedGroupMembers, setFormedGroupMembers] = useState<any[]>([]);
+const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+const groupSubscriptionRef = useRef<(() => void) | null>(null);
+const watchingAlertIdRef = useRef<string | null>(null);
+
+const [groupAreaId, setGroupAreaId] = useState<string | null>(null);
+const [groupGender, setGroupGender] = useState<string | null>(null);
+const [showAdminModal, setShowAdminModal] = useState(false);
+const [showAdminPass, setShowAdminPass] = useState(false);
+const [adminLoading, setAdminLoading] = useState(false);
+const adminForm = useForm<{ password: string }>();
+  //----
 
   // Separate countdown states: one for my outgoing alert, one for incoming alert
   const [myAlertCountdown, setMyAlertCountdown] = useState(0);
@@ -153,9 +178,38 @@ export default function MemberHomeClient() {
       )
     : undefined;
 
+
+   //claude add new
+      // Load existing active group on mount (within 8 hours)
+useEffect(() => {
+  if (!currentMember) return;
+
+  async function loadActiveGroup() {
+    try {
+      const group = await getMyActiveGroup(currentMember.id);
+      if (group) {
+  const members = await getGroupWithMembers(group.id);
+  setFormedGroupMembers(members);
+  setActiveGroupId(group.id);
+  setGroupFormed(true);
+  setGroupAreaId(currentMember.area_id);
+  setGroupGender(currentMember.gender);
+}
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  loadActiveGroup();
+}, [currentMember]);
+
+   //--------- 
+
+
+
   // Load alert history on mount
   useEffect(() => {
     if (!currentMember) return;
+    
 
     async function loadAvailabilityRequests() {
       try {
@@ -182,6 +236,29 @@ export default function MemberHomeClient() {
     loadAvailabilityRequests();
   }, [currentMember, sameGenderMembers]);
 
+  // When I'm watching an incoming alert, subscribe to group formation on it
+/*useEffect(() => {
+  if (groupSubscriptionRef.current) {
+    groupSubscriptionRef.current();
+    groupSubscriptionRef.current = null;
+  }
+
+  if (!incomingAlert) return;
+
+  const unsub = subscribeToGroupFormed(incomingAlert.id, (groupId) => {
+    handleGroupFormed(groupId);
+  });
+  groupSubscriptionRef.current = unsub;
+
+  return () => {
+    if (groupSubscriptionRef.current) {
+      groupSubscriptionRef.current();
+      groupSubscriptionRef.current = null;
+    }
+  };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [incomingAlert?.id]);*/
+
   // Countdown for MY outgoing alert — calculated from alert's created_at
   useEffect(() => {
     if (myCountdownRef.current) clearInterval(myCountdownRef.current);
@@ -194,22 +271,43 @@ export default function MemberHomeClient() {
     const tick = () => {
       const remaining = getSecondsRemaining(myActiveAlert.sentAt);
       setMyAlertCountdown(remaining);
-      if (remaining === 0) {
-        if (myCountdownRef.current) clearInterval(myCountdownRef.current);
+ if (remaining === 0) {
+  if (myCountdownRef.current) clearInterval(myCountdownRef.current);
+
+  if (!currentMember?.id) {
+    console.error('❌ currentMember is null at timer end');
+    return;
+  }
+
+  formGroup(myActiveAlert.id, currentMember.id)
+    .then(async (groupId) => {
+    
+      if (groupId) {
+        await handleGroupFormedRef.current(groupId);
+      } else {
         updateAlertStatus(myActiveAlert.id, 'expired').catch(console.error);
         setAlerts((prev) =>
           prev.map((a) => (a.id === myActiveAlert.id ? { ...a, status: 'expired' } : a))
         );
         setHasActiveAlert(false);
         setMyAlert(null);
+       toast('Nobody is available to go at this moment. Try again later! 🕊️', {
+  duration: 5000,
+});
       }
+    })
+    .catch((err) => {
+      console.error('❌ formGroup threw an error:', err);
+      console.error('Error details:', JSON.stringify(err, null, 2));
+    });
+}
     };
     tick();
     myCountdownRef.current = setInterval(tick, 1000);
     return () => {
       if (myCountdownRef.current) clearInterval(myCountdownRef.current);
     };
-  }, [myActiveAlert?.id, myActiveAlert?.sentAt]);
+   }, [myActiveAlert?.id, myActiveAlert?.sentAt, currentMember?.id]);
 
   // Countdown for INCOMING alert — calculated from alert's created_at (consistent after refresh)
   useEffect(() => {
@@ -242,16 +340,25 @@ export default function MemberHomeClient() {
   useEffect(() => {
     if (!currentMember) return;
 
-    return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+    /*return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
       const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
-      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
+      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);*/
 
-      if (soundEnabled) {
+      return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+  const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
+  setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
+  playAlertSound();
+  setBeeping(true);
+  if (beepRef.current) clearTimeout(beepRef.current);
+  beepRef.current = setTimeout(() => setBeeping(false), 5000);
+});
+
+     /* if (soundEnabled) {
         setBeeping(true);
         if (beepRef.current) clearTimeout(beepRef.current);
         beepRef.current = setTimeout(() => setBeeping(false), 5000);
       }
-    });
+    });*/
   }, [currentMember, sameGenderMembers, soundEnabled]);
 
   // Real-time subscription for alert_responses on MY alert
@@ -325,6 +432,69 @@ export default function MemberHomeClient() {
     };
   }, [currentMember]);
 
+  /* const handleGroupFormed = useCallback(async (groupId: string) => {
+  try {
+    const members = await getGroupWithMembers(groupId);*/
+
+    const playAlertSound = useCallback(() => {
+  if (!soundEnabled) return;
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    const beep = (startTime: number) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, startTime);
+      osc.frequency.setValueAtTime(660, startTime + 0.1);
+      osc.frequency.setValueAtTime(880, startTime + 0.2);
+      gain.gain.setValueAtTime(0.3, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.5);
+      osc.start(startTime);
+      osc.stop(startTime + 0.5);
+    };
+    for (let i = 0; i < 10; i++) {
+    beep(audioCtx.currentTime + i * 0.6);
+    }
+
+  } catch {
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+  }
+}, [soundEnabled]);
+
+    const handleGroupFormed = useCallback(async (groupId: string) => {
+  try {
+    const members = await getGroupWithMembers(groupId);
+    setFormedGroupMembers(members);
+    setActiveGroupId(groupId);
+    setGroupFormed(true);
+    setGroupPopupVisible(true);
+    setHasActiveAlert(false);
+    setMyAlert(null);
+    // Store area + gender for suggestions
+    if (currentMember) {
+      setGroupAreaId(currentMember.area_id);
+      setGroupGender(currentMember.gender);
+    }
+    setTimeout(() => {
+      setGroupPopupVisible(false);
+      setActiveTab('group');
+    }, 3000);
+  } catch (err) {
+    console.error('Error loading group members:', err);
+  }
+}, [currentMember, setFormedGroupMembers, setActiveGroupId, setGroupFormed,
+    setGroupPopupVisible, setHasActiveAlert, setMyAlert, setActiveTab]);
+
+
+const handleGroupFormedRef = useRef(handleGroupFormed);
+useEffect(() => {
+  handleGroupFormedRef.current = handleGroupFormed;
+}, [handleGroupFormed]);
+
   useEffect(() => {
     return () => {
       if (beepRef.current) clearTimeout(beepRef.current);
@@ -332,6 +502,8 @@ export default function MemberHomeClient() {
       if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
     };
   }, []);
+
+ 
 
   const handleSendAlert = async () => {
     if (!currentMember) return;
@@ -357,21 +529,57 @@ export default function MemberHomeClient() {
   };
 
   const handleAcceptAlert = async (alertId: string) => {
-    if (!currentMember) return;
-    try {
-      await acknowledgeAlert(alertId, currentMember.id, 'accepted');
-      setRespondedAlerts((prev) => [...prev, alertId]);
-      setAlerts((prev) =>
-        prev.map((a) =>
-          a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a
-        )
-      );
-      toast.success('Accepted! Waiting for other members...');
-    } catch (err) {
-      console.error('Unable to accept availability request', { alertId, memberId: currentMember.id, error: err });
-      toast.error('Unable to accept availability request');
+  if (!currentMember) return;
+  try {
+    await acknowledgeAlert(alertId, currentMember.id, 'accepted');
+    setRespondedAlerts((prev) => [...prev, alertId]);
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a
+      )
+    );
+
+    const alert = alerts.find((a) => a.id === alertId);
+    if (!alert) return;
+
+    const secondsLeft = getSecondsRemaining(alert.sentAt);
+
+    if (secondsLeft <= 0) {
+      toast('Timer has ended. Forming group now...');
+      const groupId = await formGroup(alertId, alert.senderId);
+      if (groupId) await handleGroupFormedRef.current(groupId);
+      return;
     }
-  };
+
+    toast.success('Accepted! Group will appear when the timer ends.');
+
+    // Don't subscribe again if already watching this alert
+    if (watchingAlertIdRef.current === alertId) return;
+    watchingAlertIdRef.current = alertId;
+
+    // Clear any old subscription
+    if (groupSubscriptionRef.current) {
+      groupSubscriptionRef.current();
+      groupSubscriptionRef.current = null;
+    }
+
+    // Subscribe — keep this alive until group forms
+    const unsub = subscribeToGroupFormed(alertId, async (groupId) => {
+        watchingAlertIdRef.current = null;
+      if (groupSubscriptionRef.current) {
+        groupSubscriptionRef.current();
+        groupSubscriptionRef.current = null;
+      }
+      await handleGroupFormedRef.current(groupId);
+    });
+
+    groupSubscriptionRef.current = unsub;
+    
+  } catch (err) {
+    console.error('Unable to accept availability request', err);
+    toast.error('Unable to accept availability request');
+  }
+};
 
   const handleIgnoreAlert = async (alertId: string) => {
     if (!currentMember) return;
@@ -394,6 +602,27 @@ export default function MemberHomeClient() {
   if (!currentMember) return null;
 
   const showIncomingBanner = !!incomingAlert && incomingAlert.status === 'active' && incomingAlertCountdown > 0;
+
+const handleAdminAccess = adminForm.handleSubmit(async (data) => {
+  setAdminLoading(true);
+  try {
+    const isValid = await verifyAdminPassword(data.password);
+    if (!isValid) {
+      adminForm.setError('password', { message: 'Incorrect password. Please try again.' });
+      return;
+    }
+    toast.success('Admin access granted');
+    localStorage.setItem('cv_admin', 'true');
+    setShowAdminModal(false);
+    adminForm.reset();
+    router.push('/admin-panel');
+  } catch (err) {
+    toast.error('Unable to verify password. Try again.');
+  } finally {
+    setAdminLoading(false);
+  }
+});
+
 
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-lg mx-auto">
@@ -432,16 +661,13 @@ export default function MemberHomeClient() {
             )}
           </button>
           <button
-            onClick={() => {
-              localStorage.setItem('cv_admin', 'true');
-              router.push('/admin-panel');
-            }}
-            className="p-2 rounded-xl hover:bg-muted transition-colors"
-            aria-label="Admin panel"
-            title="Admin Panel Access"
-          >
-            <Shield size={18} className="text-muted-foreground" />
-          </button>
+  onClick={() => setShowAdminModal(true)}
+  className="p-2 rounded-xl hover:bg-muted transition-colors"
+  aria-label="Admin panel"
+  title="Admin Panel Access"
+>
+  <Shield size={18} className="text-muted-foreground" />
+</button>
           <button
             onClick={() => setLogoutModal(true)}
             className="p-2 rounded-xl hover:bg-muted transition-colors"
@@ -615,32 +841,62 @@ export default function MemberHomeClient() {
         )}
 
         {/* GROUP TAB */}
-        {activeTab === 'group' && (
-          <div className="p-4 space-y-4 fade-in">
-            {groupFormed ? (
-              <>
-                <GroupPanel members={groupMembers} currentMember={currentMember} />
-                {recommendedPerson && (
-                  <VisitRecommendation record={recommendedPerson} groupMembers={groupMembers} />
-                )}
-              </>
-            ) : (
-              <div className="bg-card border border-border rounded-2xl p-8 text-center">
-                <Users size={40} className="text-muted-foreground mx-auto mb-3 opacity-40" />
-                <p className="font-semibold text-foreground">No active group yet</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Send an availability alert or accept someone else's alert to form a group.
-                </p>
-                <button
-                  onClick={() => setActiveTab('home')}
-                  className="mt-3 text-sm text-primary font-semibold hover:underline flex items-center gap-1 mx-auto"
-                >
-                  Go to Home <ChevronRight size={14} />
-                </button>
-              </div>
-            )}
+       {activeTab === 'group' && (
+  <div className="p-4 space-y-4 fade-in">
+    {groupFormed && formedGroupMembers.length > 0 ? (
+      <>
+        <div className="bg-card border border-success/30 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Users size={18} className="text-success" />
+            <h2 className="font-bold text-foreground">Your Group</h2>
+            <span className="ml-auto text-xs text-muted-foreground">Active for 8 hours</span>
           </div>
+          <div className="space-y-2">
+            {formedGroupMembers.map((member: any) => (
+              <div key={member.id} className="flex items-center gap-3 bg-secondary rounded-xl p-3">
+                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">
+                  {member.name?.charAt(0) ?? '?'}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {member.name}
+                    {member.id === currentMember.id && (
+                      <span className="ml-2 text-xs text-primary font-normal">(You)</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{member.society}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {groupAreaId && groupGender && (
+          <GroupSuggestions
+  areaId={groupAreaId}
+  gender={groupGender}
+  groupMemberId={currentMember.id}
+  groupId={activeGroupId}
+  currentMemberMobile={currentMember.mobile}
+/>
         )}
+      </>
+    ) : (
+      <div className="bg-card border border-border rounded-2xl p-8 text-center">
+        <Users size={40} className="text-muted-foreground mx-auto mb-3 opacity-40" />
+        <p className="font-semibold text-foreground">No active group yet</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Send an availability alert or accept someone else's alert to form a group.
+        </p>
+        <button
+          onClick={() => setActiveTab('home')}
+          className="mt-3 text-sm text-primary font-semibold hover:underline flex items-center gap-1 mx-auto"
+        >
+          Go to Home <ChevronRight size={14} />
+        </button>
+      </div>
+    )}
+  </div>
+)}
 
         {/* NOTIFICATIONS TAB */}
         {activeTab === 'notifications' && (
@@ -691,6 +947,17 @@ export default function MemberHomeClient() {
           </p>
           <div className="flex gap-2">
             <button
+  onClick={async () => {
+    if (confirm('This will permanently delete your account. Are you sure?')) {
+      await deleteMyAccount(currentMember.id);
+      router.push('/');
+    }
+  }}
+  className="w-full py-2.5 bg-destructive/10 text-destructive rounded-xl text-sm font-semibold mt-2"
+>
+  Delete My Account
+</button>
+            <button
               onClick={() => {
                 setLogoutModal(false);
                 router.push('/');
@@ -708,6 +975,94 @@ export default function MemberHomeClient() {
           </div>
         </div>
       </Modal>
+      {/* Group Formed Popup */}
+{groupPopupVisible && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-xl border border-success/30 fade-in">
+      <div className="text-center mb-4">
+        <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mx-auto mb-3">
+          <Users size={32} className="text-success" />
+        </div>
+        <h2 className="text-xl font-bold text-foreground">Group Formed!</h2>
+        <p className="text-sm text-muted-foreground mt-1">Your visit group is ready</p>
+      </div>
+      <div className="space-y-2 mb-4">
+        {formedGroupMembers.map((member: any) => (
+          <div key={member.id} className="flex items-center gap-3 bg-secondary rounded-xl p-3">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">
+              {member.name?.charAt(0) ?? '?'}
+            </div>
+            <p className="text-sm font-semibold text-foreground">
+              {member.name}
+              {member.id === currentMember.id && (
+                <span className="ml-2 text-xs text-primary font-normal">(You)</span>
+              )}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-center text-muted-foreground">
+        Switching to Group tab in 3 seconds...
+      </p>
+    </div>
+  </div>
+)}
+
+{/* Admin Password Modal */}
+<Modal
+  open={showAdminModal}
+  onClose={() => { setShowAdminModal(false); adminForm.reset(); }}
+  title="Admin Panel Access"
+>
+  <form onSubmit={handleAdminAccess} className="space-y-4">
+    <div>
+      <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+        Admin Password
+      </label>
+      <p className="text-xs text-muted-foreground mb-2">
+        Enter the password provided by the Main Admin.
+      </p>
+      <div className="relative">
+        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type={showAdminPass ? 'text' : 'password'}
+          placeholder="Enter admin password"
+          {...adminForm.register('password', { required: 'Password is required' })}
+          className="w-full pl-9 pr-10 py-2.5 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <button
+          type="button"
+          onClick={() => setShowAdminPass(!showAdminPass)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+        >
+          {showAdminPass ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+      {adminForm.formState.errors.password && (
+        <p className="mt-1 text-xs text-destructive">
+          {adminForm.formState.errors.password.message}
+        </p>
+      )}
+    </div>
+    <button
+      type="submit"
+      disabled={adminLoading}
+      className="w-full bg-primary text-primary-foreground py-2.5 rounded-xl font-semibold text-sm hover:bg-primary/90 active:scale-95 transition-all duration-150 disabled:opacity-60 flex items-center justify-center gap-2"
+    >
+      {adminLoading ? (
+        <>
+          <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+          Verifying...
+        </>
+      ) : (
+        <>
+          <Shield size={16} />
+          Access Admin Panel
+        </>
+      )}
+    </button>
+  </form>
+</Modal>
     </div>
   );
 }

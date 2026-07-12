@@ -1,8 +1,8 @@
 'use client';
-
+import { supabase } from '../../../lib/supabase';
 import React, { useEffect, useState } from 'react';
 import AddPersonModal, { AddPersonForm } from "./AddPersonModal";
-import { getAreas } from "../../../lib/services/areas";
+//import { getAreas } from "../../../lib/services/areas";
 
 import { useRouter } from 'next/navigation';
 import { Users, ClipboardList, History, MapPin, BarChart2, LogOut, Menu, X, CheckCircle, Plus, Edit2, Trash2, Shield, AlertTriangle, Calendar } from 'lucide-react';
@@ -14,8 +14,7 @@ import { mockVisitRecords } from "../../../lib/mockData";
 import MarkVisitedModal from './MarkVisitedModal';
 import AdminReports from './AdminReports';
 
-import { getCommunityRecords, addCommunityRecord, updateCommunityRecord, markCommunityRecordVisited } from "../../../lib/services/community";
-
+import { getCommunityRecords, addCommunityRecord, updateCommunityRecord, markCommunityRecordVisited, getVisitHistory } from "../../../lib/services/community";
 import {
   getPendingProfiles,
   getApprovedProfiles,
@@ -24,29 +23,64 @@ import {
 } from "../../../lib/services/profile";
 import { CommunityRecord, Gender } from '@/lib/mockData';
 import AddRecordModal from '@/app/admin-panel/components/AddRecordModal';
+import { getAreas, addArea } from "../../../lib/services/profile";
 
 
 
-type NavSection = 'approvals' | 'records' | 'history' | 'members' | 'reports';
+type NavSection = 'approvals' | 'records' | 'history' | 'members' | 'reports' | 'areas';
 
-// Simulated admin gender — in real app comes from auth session
-const ADMIN_GENDER: Gender = 'Male';
-const ADMIN_ROLE: 'main' | 'male' | 'female' = 'main';
+
 
 export default function AdminPanelClient() {
   const router = useRouter();
-  useEffect(() => {
-  const admin = localStorage.getItem("cv_admin");
 
-  if (!admin) {
-    router.replace("/");
+  // Simulated admin gender — in real app comes from auth session
+const [adminProfile, setAdminProfile] = useState<any>(null);
+const ADMIN_GENDER: Gender = (adminProfile?.gender as Gender) ?? 'Male';
+const ADMIN_ROLE: 'main' | 'male' | 'female' = !adminProfile
+  ? 'male'
+  : adminProfile.admin_type === 'main'
+    ? 'main'
+    : adminProfile.gender === 'Male' ? 'male' : 'female';
+
+useEffect(() => {
+  const admin = localStorage.getItem('cv_admin');
+  const userStr = localStorage.getItem('cv_user');
+
+  if (!admin || !userStr) {
+    router.replace('/');
+    return;
   }
+
+  const user = JSON.parse(userStr);
+
+  // Verify admin status server-side
+  supabase.rpc('is_admin', { profile_id: user.id })
+  .then(({ data: isAdmin, error }) => {
+    if (error) {
+      console.error('Admin check error:', error);
+      // Don't kick out on error — let them in if they have cv_admin set
+      setAdminProfile(user);
+      return;
+    }
+    if (!isAdmin) {
+      localStorage.removeItem('cv_admin');
+      router.replace('/');
+      return;
+    }
+    setAdminProfile(user);
+  });
 }, [router]);
 
-const admin = typeof window !== "undefined" ? localStorage.getItem("cv_admin")
-  : null;
-
+/*const admin = typeof window !== "undefined" ? localStorage.getItem("cv_admin") : null;
 if (!admin) return null;
+if (!adminProfile) return (
+  <div className="min-h-screen flex items-center justify-center">
+    <p className="text-muted-foreground text-sm">Loading admin panel...</p>
+  </div>
+);
+
+if (!admin) return null;*/
   
   const [activeSection, setActiveSection] = useState<NavSection>('approvals');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -60,57 +94,62 @@ if (!admin) return null;
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [markVisitedRecord, setMarkVisitedRecord] = useState<CommunityRecord | null>(null);
-  const [genderFilter, setGenderFilter] = useState<Gender | 'All'>(ADMIN_ROLE === 'main' ? 'All' : ADMIN_GENDER);
+  const [genderFilter, setGenderFilter] = useState<Gender | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [visitHistory, setVisitHistory] = useState<any[]>([]);
+const [showAddArea, setShowAddArea] = useState(false);
+const [newAreaName, setNewAreaName] = useState('');
+const [addingArea, setAddingArea] = useState(false);
+  
 
 useEffect(() => {
-  console.log("🚀 useEffect started");
-
-  loadCommunityRecords();
-  loadPendingMembers();
- loadApprovedMembers();
-  loadAreas();
+  
+    loadApprovedMembers();
+  loadAreas(); 
 }, []);
 
+// Load pending members only after adminProfile is available
+useEffect(() => {
+  if (!adminProfile) return;
+  loadPendingMembers(adminProfile);
+  loadCommunityRecords(adminProfile);
+  loadVisitHistory(adminProfile);
+}, [adminProfile]);
 
+useEffect(() => {
+  if (!adminProfile) return;
+  const isMain = adminProfile.admin_type === 'main';
+  setGenderFilter(isMain ? 'All' : (adminProfile.gender as Gender));
+}, [adminProfile]);
 
-async function loadCommunityRecords() {
-   console.log("📥 loadCommunityRecords called");
-  const records = await getCommunityRecords();
-
-  console.log(records);
+async function loadCommunityRecords(profile?: any) {
+  const activeProfile = profile ?? adminProfile;
+   
+  const isMain = activeProfile?.admin_type === 'main';
+  const records = await getCommunityRecords({
+    area_id: activeProfile?.area_id,
+    gender: activeProfile?.gender,
+    isMain,
+  });
+  
+  
 
   if (records) {
-    const formatted = records.map((r:any)=>({
-
-    id: r.id,
-
-    name: r.name,
-
-    mobile: r.mobile,
-
-    gender: r.gender,
-
-    area: r.areas?.name ?? "",
-
-    areaId: r.area_id,
-
-    society: r.society,
-
-    building: r.building,
-
-    visitCount: r.visit_count,
-
-    lastVisitedDate: r.last_visited_date,
-
-    priority: "medium",
-
-    notes: r.notes ?? ""
-
-}));
-
+    const formatted = records.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      mobile: r.mobile,
+      gender: r.gender,
+      area: r.areas?.name ?? '',
+      areaId: r.area_id,
+      society: r.society,
+      house_no: r.house_no,
+      visitCount: r.visit_count,
+      lastVisitedDate: r.last_visited_date,
+      priority: 'medium',
+      notes: r.notes ?? '',
+    }));
     setCommunityRecords(formatted);
-    console.log("Formatted:", formatted);
   }
 }
 
@@ -181,12 +220,15 @@ async function savePerson(data: AddPersonForm) {
 
 }
 
-async function loadPendingMembers() {
-  const data = await getPendingProfiles();
-
-  console.log("Pending Profiles:", data);
-
-  setPendingMembers(data);
+async function loadPendingMembers(profile?: any) {
+  const activeProfile = profile ?? adminProfile;
+  const isMain = activeProfile?.admin_type === 'main';
+  const data = await getPendingProfiles({
+    role: isMain ? 'main' : (activeProfile?.gender === 'Male' ? 'male' : 'female'),
+    area_id: activeProfile?.area_id,
+    gender: activeProfile?.gender,
+  });
+   setPendingMembers(data);
 }
 
 async function loadApprovedMembers() {
@@ -195,10 +237,21 @@ async function loadApprovedMembers() {
   setApprovedMembers(data);
 }
 
+async function loadVisitHistory(profile?: any) {
+  const activeProfile = profile ?? adminProfile;
+  const isMain = activeProfile?.admin_type === 'main';
+  const data = await getVisitHistory({
+    area_id: activeProfile?.area_id,
+    gender: activeProfile?.gender,
+    isMain,
+  });
+  setVisitHistory(data);
+}
 
   const navItems: { id: NavSection; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'approvals', label: 'Approvals', icon: <CheckCircle size={18} />, badge: pendingMembers.length },
     { id: 'records', label: 'Community Records', icon: <ClipboardList size={18} /> },
+    { id: 'areas', label: 'Manage Areas', icon: <MapPin size={18} /> },
     { id: 'history', label: 'Visit History', icon: <History size={18} /> },
     { id: 'members', label: 'Members', icon: <Users size={18} /> },
     { id: 'reports', label: 'Reports', icon: <BarChart2 size={18} /> },
@@ -312,8 +365,33 @@ const handleReject = async (memberId: string) => {
     return <Badge variant="muted">Low</Badge>;
   };
 
-  console.log("communityRecords state:", communityRecords);
-console.log("filteredRecords:", filteredRecords);
+
+// ── Early returns — must be after all hooks ──
+  const admin = typeof window !== "undefined" ? localStorage.getItem("cv_admin") : null;
+  if (!admin) return null;
+  if (!adminProfile) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <p className="text-muted-foreground text-sm">Loading...</p>
+    </div>
+  );
+
+  async function handleAddArea() {
+  if (!newAreaName.trim()) return;
+  setAddingArea(true);
+  try {
+    await addArea(newAreaName.trim());
+    toast.success(`Area "${newAreaName}" added!`);
+    setNewAreaName('');
+    setShowAddArea(false);
+    loadAreas();
+  } catch (err) {
+    console.error(err);
+    toast.error('Failed to add area');
+  } finally {
+    setAddingArea(false);
+  }
+}
+
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -329,12 +407,23 @@ console.log("filteredRecords:", filteredRecords);
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <Shield size={16} className="text-primary-foreground" />
             </div>
-            <div>
-              <p className="text-sm font-bold text-foreground">Admin Panel</p>
-              <p className="text-xs text-muted-foreground">
-                {ADMIN_ROLE === 'main' ? 'Main Admin' : `${ADMIN_GENDER} Admin`}
-              </p>
-            </div>
+           <div>
+  <p className="text-sm font-bold text-foreground">
+    {adminProfile?.name ?? 'Admin'}
+  </p>
+  <div className="flex items-center gap-1 mt-0.5">
+    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+      ADMIN_GENDER === 'Male'
+        ? 'bg-primary/10 text-primary'
+        : 'bg-accent/10 text-accent'
+    }`}>
+      {ADMIN_GENDER}
+    </span>
+    <span className="text-xs text-muted-foreground">
+      {ADMIN_ROLE === 'main' ? 'Main Admin' : 'Admin'}
+    </span>
+  </div>
+</div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -347,18 +436,12 @@ console.log("filteredRecords:", filteredRecords);
 
         </div>
 
-<button
-  onClick={async () => {
-    const records = await getCommunityRecords();
-    console.log(records);
-  }}
->
-  Test Database
-</button>
+
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
+            
             <button
               key={`nav-${item.id}`}
               onClick={() => { setActiveSection(item.id); setSidebarOpen(false); }}
@@ -452,9 +535,7 @@ console.log("filteredRecords:", filteredRecords);
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {pendingMembers
-                    .filter((m) => ADMIN_ROLE === 'main' || m.gender === ADMIN_GENDER)
-                    .map((member) => (
+                  {pendingMembers.map((member) => (
                       
   <div
     key={member.id}
@@ -673,52 +754,65 @@ console.log("filteredRecords:", filteredRecords);
 
           {/* ── VISIT HISTORY ── */}
           {activeSection === 'history' && (
-            <div className="space-y-3 fade-in">
-              <p className="text-xs text-muted-foreground">
-                Showing all {mockVisitRecords.length} recorded visits
-              </p>
-              {mockVisitRecords
-                .filter((v) => ADMIN_ROLE === 'main' || v.gender === ADMIN_GENDER)
-                .sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime())
-                .map((visit) => (
-                  <div
-                    key={`visit-${visit.id}`}
-                    className="bg-card border border-border rounded-2xl p-4 hover:shadow-sm transition-shadow fade-in"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <p className="font-semibold text-foreground text-sm">{visit.communityRecordName}</p>
-                          <Badge variant={visit.gender === 'Male' ? 'primary' : 'accent'}>{visit.gender}</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
-                          <Calendar size={12} />
-                          {new Date(visit.visitDate).toLocaleDateString('en-IN')} at {visit.visitTime}
-                        </p>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Recorded by: {visit.adminName}
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                          {visit.groupMembers.map((m) => (
-                            <span
-                              key={`vm-${visit.id}-${m}`}
-                              className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full"
-                            >
-                              {m}
-                            </span>
-                          ))}
-                        </div>
-                        {visit.notes && (
-                          <p className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-2 py-1.5">
-                            📝 {visit.notes}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+  <div className="space-y-3 fade-in">
+    <p className="text-xs text-muted-foreground">
+      Showing {visitHistory.length} recorded visits
+    </p>
+    {visitHistory.length === 0 ? (
+      <div className="bg-card border border-border rounded-2xl p-8 text-center">
+        <History size={40} className="text-muted-foreground mx-auto mb-3 opacity-40" />
+        <p className="font-semibold text-foreground">No visits recorded yet</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Visits marked by group members will appear here.
+        </p>
+      </div>
+    ) : (
+      visitHistory.map((visit: any) => {
+        const record = visit.community_records;
+        const visitor = visit.profiles;
+
+        
+        return (
+          <div
+            key={visit.id}
+            className="bg-card border border-border rounded-2xl p-4 hover:shadow-sm transition-shadow fade-in"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <p className="font-semibold text-foreground text-sm">
+                    {record?.name ?? 'Unknown'}
+                  </p>
+                  <Badge variant={record?.gender === 'Male' ? 'primary' : 'accent'}>
+                    {record?.gender}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {record?.society} · {record?.areas?.name}
+                </p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1">
+                  <Calendar size={12} />
+                  {new Date(visit.visit_date).toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                  })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Marked by: <span className="font-medium text-foreground">{visitor?.name ?? 'Unknown'}</span>
+                </p>
+                {visit.notes && (
+                  <p className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-2 py-1.5">
+                    📝 {visit.notes}
+                  </p>
+                )}
+              </div>
             </div>
-          )}
+          </div>
+        );
+      })
+    )}
+  </div>
+)}
 
           {/* ── MEMBERS ── */}
           {activeSection === 'members' && (
@@ -765,6 +859,86 @@ console.log("filteredRecords:", filteredRecords);
               adminRole={ADMIN_ROLE}
             />
           )}
+
+          {/* ── AREAS ── */}
+{activeSection === 'areas' && (
+  <div className="space-y-4 fade-in">
+    <div className="flex items-center justify-between mb-2">
+      <h2 className="text-sm font-semibold text-foreground">
+        Areas ({areas.length})
+      </h2>
+      <button
+        onClick={() => setShowAddArea(true)}
+        className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 active:scale-95 transition-all"
+      >
+        <Plus size={16} />
+        Add Area
+      </button>
+    </div>
+
+    {areas.length === 0 ? (
+      <div className="bg-card border border-border rounded-2xl p-8 text-center">
+        <MapPin size={40} className="text-muted-foreground mx-auto mb-3 opacity-40" />
+        <p className="font-semibold text-foreground">No areas yet</p>
+      </div>
+    ) : (
+      <div className="grid gap-3 sm:grid-cols-2">
+        {areas.map((area: any) => (
+          <div
+            key={area.id}
+            className="bg-card border border-border rounded-2xl p-4 flex items-center gap-3"
+          >
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <MapPin size={18} className="text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground text-sm">{area.name}</p>
+              <p className="text-xs text-muted-foreground">ID: {area.id.slice(0, 8)}...</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {/* Add Area Modal */}
+    <Modal
+      open={showAddArea}
+      onClose={() => { setShowAddArea(false); setNewAreaName(''); }}
+      title="Add New Area"
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+            Area Name
+          </label>
+          <input
+            type="text"
+            placeholder="e.g. Area C, Sector 5..."
+            value={newAreaName}
+            onChange={(e) => setNewAreaName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddArea()}
+            className="w-full px-3 py-2.5 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={handleAddArea}
+            disabled={addingArea || !newAreaName.trim()}
+            className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 active:scale-95 transition-all disabled:opacity-60"
+          >
+            {addingArea ? 'Adding...' : 'Add Area'}
+          </button>
+          <button
+            onClick={() => { setShowAddArea(false); setNewAreaName(''); }}
+            className="flex-1 py-2.5 bg-muted text-foreground rounded-xl text-sm font-semibold"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  </div>
+)}
         </main>
       </div>
 

@@ -7,12 +7,13 @@ import { loginUser } from "../../../lib/services/profile";
 import { Eye, EyeOff, Phone, User, Lock, Shield, Copy, Check, Users, ChevronRight } from 'lucide-react';
 import AppLogo from '../../../components/ui/AppLogo';
 import Modal from '../../../components/ui/Modal';
-import {
-  ADMIN_PANEL_PASSWORD,
+import { verifyAdminPassword } from '../../../lib/services/adminAuth';
+/*import {
   demoCredentials,
   type Gender
-} from "../../../lib/mockData";
+} from "../../../lib/mockData";*/
 
+   import { getUserFriendlyError } from '../../../lib/errors';
 import {
   registerUser,
   getAreas
@@ -81,22 +82,49 @@ export default function SignUpLoginClient() {
 
     await new Promise((r) => setTimeout(r, 900));
 
-    const user = await loginUser(data.mobile, data.pin);
+   const result = await loginUser(data.mobile, data.pin);
+   
 
-    if (!user) {
-      loginForm.setError("pin", {
-        message:
-          "Invalid mobile number, PIN, or your account hasn't been approved yet.",
-      });
+if (result.status === 'not_found') {
+  loginForm.setError('pin', { message: 'Invalid mobile number or PIN.' });
+  return;
+}
 
-      setLoginLoading(false);
-      return;
-    }
+if (result.status === 'pending') {
+  toast.error('Your registration is pending. Please contact your area admin for approval.');
+  return;
+}
+
+if (result.status === 'blocked') {
+  toast.error('Your account has been blocked. Please contact your admin.');
+  return;
+}
+
+if (!result.user) {
+  toast.error('Something went wrong. Please try again.');
+  return;
+}
+
+// approved
+const safeUser = {
+  id: result.user.id,
+  name: result.user.name,
+  gender: result.user.gender,
+  area_id: result.user.area_id,
+  area: (result.user as any).areas?.name ?? '',
+  society: result.user.society,
+  house_no: result.user.house_no,
+  role: result.user.role,
+  admin_type: result.user.admin_type ?? null,
+};
+localStorage.setItem('cv_user', JSON.stringify(safeUser));
+toast.success(`Welcome, ${result.user.name}!`);
+router.push('/member-home');
 
     // One session for everyone
-    localStorage.setItem("cv_user", JSON.stringify(user));
+   // localStorage.setItem("cv_user", JSON.stringify(user));
 
-    toast.success(`Welcome back, ${user.name}!`);
+   // toast.success(`Welcome back, ${user.name}!`);
 
     setLoginLoading(false);
 
@@ -126,27 +154,32 @@ export default function SignUpLoginClient() {
 
     setRegisterLoading(false);
 
-    toast.error(err.message);
+toast.error(getUserFriendlyError(err)); // ✅ safe generic message
 
   }
 });
 
   // BACKEND INTEGRATION POINT: Replace with real admin auth
   const handleAdminAccess = adminForm.handleSubmit(async (data) => {
-    setAdminLoading(true);
-    await new Promise((r) => setTimeout(r, 700));
-    if (data.password !== ADMIN_PANEL_PASSWORD) {
+  setAdminLoading(true);
+  try {
+    const isValid = await verifyAdminPassword(data.password);
+    if (!isValid) {
       adminForm.setError('password', { message: 'Incorrect password. Please try again.' });
-      setAdminLoading(false);
       return;
     }
     toast.success('Admin access granted');
-     localStorage.setItem("cv_admin", "true");
-    setAdminLoading(false);
+    localStorage.setItem('cv_admin', 'true');
+    // cv_user is already set from member login — admin panel will use it for area+gender filtering
     setShowAdminModal(false);
-   
     router.push('/admin-panel');
-  });
+  } catch (err) {
+    console.error('Admin auth error:', err);
+    toast.error('Unable to verify password. Try again.');
+  } finally {
+    setAdminLoading(false);
+  }
+});
 
   const handleCopy = (value: string, key: string) => {
     if (typeof navigator !== 'undefined') {
@@ -158,11 +191,11 @@ export default function SignUpLoginClient() {
   };
 
   const autofillDemo = (mobile: string, pin: string) => {
-    if (pin === ADMIN_PANEL_PASSWORD) return;
-    loginForm.setValue('mobile', mobile);
-    loginForm.setValue('pin', pin);
-    setActiveTab('login');
-  };
+  if (mobile === 'N/A') return; // skip admin password entry
+  loginForm.setValue('mobile', mobile);
+  loginForm.setValue('pin', pin);
+  setActiveTab('login');
+};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-secondary via-background to-muted flex flex-col items-center justify-center p-4">
@@ -465,44 +498,8 @@ export default function SignUpLoginClient() {
 
       {/* Demo Credentials Box */}
       <div className="w-full max-w-sm mt-4 bg-card border border-border rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 bg-muted/50 border-b border-border">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Demo Credentials</p>
-        </div>
-        <div className="divide-y divide-border">
-          {demoCredentials.map((cred) => (
-            <div key={`demo-${cred.role}`} className="flex items-center justify-between px-4 py-2.5">
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-foreground truncate">{cred.role}</p>
-                <p className="text-xs text-muted-foreground">
-                  {cred.mobile !== 'N/A' ? `📱 ${cred.mobile}` : '🔐 Admin Panel'}
-                  {' · '}
-                  <span className="font-mono">{cred.pin}</span>
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 ml-2">
-                {cred.mobile !== 'N/A' && (
-                  <button
-                    onClick={() => autofillDemo(cred.mobile, cred.pin)}
-                    className="text-xs text-primary font-semibold px-2 py-1 bg-primary/10 rounded-lg hover:bg-primary/20 transition-colors"
-                  >
-                    Use
-                  </button>
-                )}
-                <button
-                  onClick={() => handleCopy(cred.pin, `${cred.role}-pin`)}
-                  className="p-1 rounded-lg hover:bg-muted transition-colors"
-                  aria-label={`Copy PIN for ${cred.role}`}
-                >
-                  {copiedField === `${cred.role}-pin` ? (
-                    <Check size={14} className="text-success" />
-                  ) : (
-                    <Copy size={14} className="text-muted-foreground" />
-                  )}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        
+        
       </div>
 
       {/* Admin Panel Access Button */}

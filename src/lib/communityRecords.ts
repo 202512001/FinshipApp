@@ -42,8 +42,6 @@ import { supabase } from "./supabase";
 export async function getCommunityRecords() {
   const { data, error } = await supabase?.from("community_records")?.select("*");
 
-  console.log("DATA =", data);
-  console.log("ERROR =", error);
 
   if (error) {
     alert(error?.message);
