@@ -662,7 +662,14 @@ const handleAdminAccess = adminForm.handleSubmit(async (data) => {
             )}
           </button>
           <button
-  onClick={() => setShowAdminModal(true)}
+  onClick={() => {
+  const alreadyAdmin = localStorage.getItem('cv_admin');
+  if (alreadyAdmin) {
+    router.push('/admin-panel');
+  } else {
+    setShowAdminModal(true);
+  }
+}}
   className="p-2 rounded-xl hover:bg-muted transition-colors"
   aria-label="Admin panel"
   title="Admin Panel Access"
@@ -960,9 +967,11 @@ const handleAdminAccess = adminForm.handleSubmit(async (data) => {
 </button>
             <button
               onClick={() => {
-                setLogoutModal(false);
-                router.push('/');
-              }}
+  localStorage.removeItem('cv_user');
+  localStorage.removeItem('cv_admin');
+  setLogoutModal(false);
+  router.replace('/sign-up-login-screen');
+}}
               className="flex-1 py-2.5 bg-destructive text-destructive-foreground rounded-xl text-sm font-semibold hover:bg-destructive/90 active:scale-95 transition-all"
             >
               Sign Out

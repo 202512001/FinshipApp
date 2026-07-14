@@ -7,7 +7,7 @@ import { loginUser } from "../../../lib/services/profile";
 import { Eye, EyeOff, Phone, User, Lock, Shield, Copy, Check, Users, ChevronRight } from 'lucide-react';
 import AppLogo from '../../../components/ui/AppLogo';
 import Modal from '../../../components/ui/Modal';
-import { verifyAdminPassword } from '../../../lib/services/adminAuth';
+/*import { verifyAdminPassword } from '../../../lib/services/adminAuth';
 /*import {
   demoCredentials,
   type Gender
@@ -43,13 +43,13 @@ export default function SignUpLoginClient() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('login');
   const [showPin, setShowPin] = useState(false);
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [showAdminPass, setShowAdminPass] = useState(false);
+  //const [showAdminModal, setShowAdminModal] = useState(false);
+  //const [showAdminPass, setShowAdminPass] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
-  const [adminLoading, setAdminLoading] = useState(false);
+  //const [adminLoading, setAdminLoading] = useState(false);
   const [areas, setAreas] = useState<any[]>([]);
 
   const loginForm = useForm<LoginForm>({ defaultValues: { mobile: '', pin: '' } });
@@ -64,7 +64,7 @@ export default function SignUpLoginClient() {
     pin: "",
   },
 });
-  const adminForm = useForm<AdminPasswordForm>({ defaultValues: { password: '' } });
+  //const adminForm = useForm<AdminPasswordForm>({ defaultValues: { password: '' } });
 
 useEffect(() => {
   async function load() {
@@ -167,7 +167,7 @@ toast.error(getUserFriendlyError(err)); // ✅ safe generic message
 });
 
   // BACKEND INTEGRATION POINT: Replace with real admin auth
-  const handleAdminAccess = adminForm.handleSubmit(async (data) => {
+  /*const handleAdminAccess = adminForm.handleSubmit(async (data) => {
   setAdminLoading(true);
   try {
     const isValid = await verifyAdminPassword(data.password);
@@ -186,7 +186,7 @@ toast.error(getUserFriendlyError(err)); // ✅ safe generic message
   } finally {
     setAdminLoading(false);
   }
-});
+});*/
 
   const handleCopy = (value: string, key: string) => {
     if (typeof navigator !== 'undefined') {
@@ -509,16 +509,24 @@ toast.error(getUserFriendlyError(err)); // ✅ safe generic message
         
       </div>
 
-      {/* Admin Panel Access Button */}
+    {/*  {/* Admin Panel Access Button 
       <button
-        onClick={() => setShowAdminModal(true)}
+        onClick={() => {
+  const alreadyAdmin = localStorage.getItem('cv_admin');
+  if (alreadyAdmin) {
+    router.push('/admin-panel');
+  } else {
+    setShowAdminModal(true);
+  }
+}}
         className="mt-4 flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors px-4 py-2 rounded-xl hover:bg-card border border-transparent hover:border-border"
       >
         <Shield size={16} />
         Admin Panel Access
-      </button>
+      </button>*/}
 
       {/* Admin Password Modal */}
+      {/*
       <Modal open={showAdminModal} onClose={() => { setShowAdminModal(false); adminForm.reset(); }} title="Admin Panel Access">
         <form onSubmit={handleAdminAccess} className="space-y-4">
           <div>
@@ -565,7 +573,7 @@ toast.error(getUserFriendlyError(err)); // ✅ safe generic message
             )}
           </button>
         </form>
-      </Modal>
+      </Modal>*/}
     </div>
   );
 }
