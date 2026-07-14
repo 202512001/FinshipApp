@@ -178,3 +178,12 @@ export async function deleteMyAccount(profileId: string) {
   localStorage.removeItem('cv_user');
   localStorage.removeItem('cv_admin');
 }
+
+export async function saveFcmToken(profileId: string, token: string) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ fcm_token: token })
+    .eq('id', profileId);
+
+  if (error) throw error;
+}

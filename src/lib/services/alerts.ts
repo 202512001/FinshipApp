@@ -460,3 +460,39 @@ export function subscribeToGroupFormed(
 
   return () => supabase.removeChannel(channel);
 }
+
+export async function sendPushNotificationsToArea(
+  areaId: string,
+  gender: string,
+  senderId: string,
+  senderName: string,
+  area: string
+) {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('fcm_token')
+      .eq('area_id', areaId)
+      .eq('gender', gender)
+      .eq('status', 'approved')
+      .neq('id', senderId)
+      .not('fcm_token', 'is', null);
+
+    if (error || !data || data.length === 0) return;
+
+    const tokens = data
+      .map((p: any) => p.fcm_token)
+      .filter(Boolean);
+
+    // Send to each token one by one
+    for (const token of tokens) {
+      await fetch('/api/send-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, senderName, area }),
+      }).catch(() => {});
+    }
+  } catch {
+    // silently fail — don't break main alert flow
+  }
+}

@@ -41,6 +41,7 @@ import {
   getGroupWithMembers,
   getMyActiveGroup,
   subscribeToGroupFormed,
+   sendPushNotificationsToArea,
 } from '../../../lib/services/alerts';
 import GroupSuggestions from './GroupSuggestions';
 //-------------------
@@ -48,8 +49,10 @@ import GroupPanel from './GroupPanel';
 import VisitRecommendation from './VisitRecommendation';
 import NotificationFeed from './NotificationFeed';
 import { deleteMyAccount } from '../../../lib/services/profile';
+import { requestNotificationPermission, onForegroundMessage } from '../../../lib/firebase';
+import { saveFcmToken } from '../../../lib/services/profile';
 
-const ALERT_DURATION_SECONDS = 20; // 4 minutes
+const ALERT_DURATION_SECONDS = 3 * 60; // 3 minutes
 
 function getSecondsRemaining(createdAt: string): number {
   const created = new Date(createdAt).getTime();
@@ -124,6 +127,22 @@ export default function MemberHomeClient() {
     }
     loadCommunityRecords();
   }, [currentMember]);
+
+  // Request notification permission and save FCM token
+useEffect(() => {
+  if (!currentMember) return;
+
+  requestNotificationPermission().then((token) => {
+    if (token) {
+      saveFcmToken(currentMember.id, token).catch(() => {});
+    }
+  });
+
+  onForegroundMessage((payload) => {
+    playAlertSound();
+    toast(`📢 ${payload.notification?.title}`, { duration: 8000 });
+  });
+}, [currentMember?.id]);
 
   const [activeTab, setActiveTab] = useState<'home' | 'group' | 'notifications'>('home');
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -515,12 +534,21 @@ useEffect(() => {
       setMyAlert(result.alert);
       setAlerts((prev) => [alert, ...prev.filter((item) => item.id !== alert.id)]);
 
-      if (result.created) {
-        setHasActiveAlert(true);
-        toast.success('Availability alert sent! Waiting for members to accept (4 minutes)...');
-      } else {
-        toast(result.message);
-      }
+     if (result.created) {
+  setHasActiveAlert(true);
+  toast.success('Availability alert sent! Waiting for members to accept (4 minutes)...');
+
+  // Send push notifications to all members
+  sendPushNotificationsToArea(
+    currentMember.area_id,
+    currentMember.gender,
+    currentMember.id,
+    currentMember.name,
+    currentMember.area ?? ''
+  );
+} else {
+  toast(result.message);
+}
     } catch (err) {
       console.error(err);
       toast.error('Unable to send availability request');
