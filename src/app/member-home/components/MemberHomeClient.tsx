@@ -87,8 +87,9 @@ export default function MemberHomeClient() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const storedUser = localStorage.getItem('cv_user');
+    
     if (!storedUser) {
-      router.replace('/');
+      router.replace('/sign-up-login-screen');
       return;
     }
     setCurrentMember(JSON.parse(storedUser));

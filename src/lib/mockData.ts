@@ -417,11 +417,6 @@ export const mockGroups: Group[] = [
   },
 ];
 
-//export const ADMIN_PANEL_PASSWORD = 'WeWill2026';
 
-/*export const demoCredentials = [
-  { role: 'Male Member', mobile: '9099920875', pin: '1234', name: 'Dhyey' },
-  { role: 'Female Member', mobile: '9904040385', pin: '1234', name: 'Shruti' },
-  { role: 'Admin Panel', mobile: 'N/A', pin: '(contact main admin)', name: 'Password Entry' },
-];*/
+
 

@@ -66,14 +66,21 @@ export default function SignUpLoginClient() {
 });
   const adminForm = useForm<AdminPasswordForm>({ defaultValues: { password: '' } });
 
-  useEffect(() => {
+useEffect(() => {
   async function load() {
     const data = await getAreas();
     setAreas(data);
   }
-
   load();
 }, []);
+
+// Add this new one right after ↓
+useEffect(() => {
+  const existingUser = localStorage.getItem('cv_user');
+  if (existingUser) {
+    router.replace('/member-home');
+  }
+}, [router]);
 
   // BACKEND INTEGRATION POINT: Replace with real authentication API call
   const handleLogin = loginForm.handleSubmit(async (data) => {

@@ -48,7 +48,7 @@ useEffect(() => {
   const userStr = localStorage.getItem('cv_user');
 
   if (!admin || !userStr) {
-    router.replace('/');
+   router.replace('/sign-up-login-screen');
     return;
   }
 
@@ -58,14 +58,14 @@ useEffect(() => {
   supabase.rpc('is_admin', { profile_id: user.id })
   .then(({ data: isAdmin, error }) => {
     if (error) {
-      console.error('Admin check error:', error);
+      
       // Don't kick out on error — let them in if they have cv_admin set
       setAdminProfile(user);
       return;
     }
     if (!isAdmin) {
       localStorage.removeItem('cv_admin');
-      router.replace('/');
+      router.replace('/sign-up-login-screen');
       return;
     }
     setAdminProfile(user);
