@@ -367,13 +367,21 @@ const handleReject = async (memberId: string) => {
 
 
 // ── Early returns — must be after all hooks ──
-  const admin = typeof window !== "undefined" ? localStorage.getItem("cv_admin") : null;
-  if (!admin) return null;
-  if (!adminProfile) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <p className="text-muted-foreground text-sm">Loading...</p>
-    </div>
-  );
+  const [mounted, setMounted] = useState(false);
+
+useEffect(() => {
+  setMounted(true);
+}, []);
+
+if (!mounted) return null;
+
+const admin = localStorage.getItem("cv_admin");
+if (!admin) return null;
+if (!adminProfile) return (
+  <div className="min-h-screen flex items-center justify-center">
+    <p className="text-muted-foreground text-sm">Loading...</p>
+  </div>
+);
 
   async function handleAddArea() {
   if (!newAreaName.trim()) return;

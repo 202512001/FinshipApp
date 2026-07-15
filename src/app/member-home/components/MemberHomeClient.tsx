@@ -178,7 +178,7 @@ const adminForm = useForm<{ password: string }>();
   const [incomingAlertCountdown, setIncomingAlertCountdown] = useState(0);
   const myCountdownRef = useRef<NodeJS.Timeout | null>(null);
   const incomingCountdownRef = useRef<NodeJS.Timeout | null>(null);
-
+const currentMemberRef = useRef<any>(null);
   // Derived: active incoming alert (same area + gender, not mine)
   const incomingAlert = currentMember
     ? alerts.find(
@@ -256,6 +256,9 @@ useEffect(() => {
     loadAvailabilityRequests();
   }, [currentMember, sameGenderMembers]);
 
+  useEffect(() => {
+  currentMemberRef.current = currentMember;
+}, [currentMember]);
   // When I'm watching an incoming alert, subscribe to group formation on it
 /*useEffect(() => {
   if (groupSubscriptionRef.current) {
@@ -364,15 +367,16 @@ useEffect(() => {
       const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
       setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);*/
 
-      return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+   return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
   const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
   setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
-  playAlertSound();
+  // Switch to home tab so banner is visible
+  setActiveTab('home');
   setBeeping(true);
+  playAlertSound();
   if (beepRef.current) clearTimeout(beepRef.current);
   beepRef.current = setTimeout(() => setBeeping(false), 5000);
 });
-
      /* if (soundEnabled) {
         setBeeping(true);
         if (beepRef.current) clearTimeout(beepRef.current);
@@ -455,12 +459,17 @@ useEffect(() => {
   /* const handleGroupFormed = useCallback(async (groupId: string) => {
   try {
     const members = await getGroupWithMembers(groupId);*/
-
-    const playAlertSound = useCallback(() => {
+const playAlertSound = useCallback(() => {
   if (!soundEnabled) return;
   try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    const audioCtx = new AudioContext();
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (!audioCtxRef.current && AC) {
+      audioCtxRef.current = new AC();
+    }
+    const audioCtx = audioCtxRef.current;
+    if (!audioCtx) return;
+
+    if (audioCtx.state === 'suspended') audioCtx.resume();
 
     const beep = (startTime: number) => {
       const osc = audioCtx.createOscillator();
@@ -476,10 +485,10 @@ useEffect(() => {
       osc.start(startTime);
       osc.stop(startTime + 0.5);
     };
-    for (let i = 0; i < 10; i++) {
-    beep(audioCtx.currentTime + i * 0.6);
-    }
 
+    for (let i = 0; i < 10; i++) {
+      beep(audioCtx.currentTime + i * 0.6);
+    }
   } catch {
     if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
   }
@@ -494,10 +503,11 @@ useEffect(() => {
     setGroupPopupVisible(true);
     setHasActiveAlert(false);
     setMyAlert(null);
-    // Store area + gender for suggestions
-    if (currentMember) {
-      setGroupAreaId(currentMember.area_id);
-      setGroupGender(currentMember.gender);
+    // Use ref instead of currentMember to avoid stale closure
+    const member = currentMemberRef.current;
+    if (member) {
+      setGroupAreaId(member.area_id);
+      setGroupGender(member.gender);
     }
     setTimeout(() => {
       setGroupPopupVisible(false);
@@ -506,7 +516,7 @@ useEffect(() => {
   } catch (err) {
     console.error('Error loading group members:', err);
   }
-}, [currentMember, setFormedGroupMembers, setActiveGroupId, setGroupFormed,
+}, [setFormedGroupMembers, setActiveGroupId, setGroupFormed,
     setGroupPopupVisible, setHasActiveAlert, setMyAlert, setActiveTab]);
 
 
@@ -523,7 +533,24 @@ useEffect(() => {
     };
   }, []);
 
- 
+ const audioCtxRef = useRef<AudioContext | null>(null);
+
+useEffect(() => {
+  const initAudio = () => {
+    if (!audioCtxRef.current) {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (AC) audioCtxRef.current = new AC();
+    }
+    document.removeEventListener('touchstart', initAudio);
+    document.removeEventListener('click', initAudio);
+  };
+  document.addEventListener('touchstart', initAudio);
+  document.addEventListener('click', initAudio);
+  return () => {
+    document.removeEventListener('touchstart', initAudio);
+    document.removeEventListener('click', initAudio);
+  };
+}, []);
 
   const handleSendAlert = async () => {
     if (!currentMember) return;
@@ -536,7 +563,7 @@ useEffect(() => {
 
      if (result.created) {
   setHasActiveAlert(true);
-  toast.success('Availability alert sent! Waiting for members to accept (4 minutes)...');
+  toast.success('Availability alert sent! Waiting for members to accept (3 minutes)...');
 
   // Send push notifications to all members
   sendPushNotificationsToArea(
@@ -815,7 +842,7 @@ const handleAdminAccess = adminForm.handleSubmit(async (data) => {
               </button>
               {hasActiveAlert && (
                 <p className="text-xs text-muted-foreground mt-3">
-                  Alert active for 4 minutes. Members can accept until the timer ends.
+                  Alert active for 3 minutes. Members can accept until the timer ends.
                 </p>
               )}
             </div>

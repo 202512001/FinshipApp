@@ -266,24 +266,25 @@ export function subscribeToNewAvailabilityAlerts(
   currentUser: AvailabilityActor,
   callback: (alert: any) => void
 ) {
+  const channelName = `availability-${currentUser.area_id}-${currentUser.gender}-${Date.now()}`;
+  
   const channel = supabase
-    .channel(
-      `availability-${currentUser.area_id}-${currentUser.gender}`
-    )
+    .channel(channelName)
     .on(
-      "postgres_changes",
+      'postgres_changes',
       {
-        event: "INSERT",
-        schema: "public",
-        table: "alerts",
+        event: 'INSERT',
+        schema: 'public',
+        table: 'alerts',
       },
       (payload) => {
         const alert = payload.new as any;
+       
 
         if (
           alert.area_id === currentUser.area_id &&
           alert.gender === currentUser.gender &&
-          alert.status === "active" &&
+          alert.status === 'active' &&
           alert.sender_id !== currentUser.id
         ) {
           callback(alert);
@@ -291,12 +292,11 @@ export function subscribeToNewAvailabilityAlerts(
       }
     )
     .subscribe();
-
+    
   return () => {
     supabase.removeChannel(channel);
   };
 }
-
 export function subscribeToAlertResponses(
   alertId: string,
   callback: () => void
