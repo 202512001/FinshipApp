@@ -30,6 +30,6 @@ messaging.onBackgroundMessage((payload) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.openWindow('/')
+    clients.openWindow('https://finship-app.vercel.app/member-home')
   );
 });

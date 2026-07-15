@@ -18,27 +18,43 @@ export async function POST(req: NextRequest) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: {
-              title: `${senderName} is Available! 🔔`,
-              body: `Ready to visit someone in ${area}. Tap to respond!`,
-            },
-            webpush: {
-              notification: {
-                icon: '/assets/images/app_logo.png',
-                vibrate: [200, 100, 200],
-                tag: 'community-alert',
-                renotify: true,
-                requireInteraction: true,
-              },
-              fcm_options: {
-                link: '/',
-              },
-            },
-          },
-        }),
+       body: JSON.stringify({
+  message: {
+    token,
+    notification: {
+      title: `${senderName} is Available! 🔔`,
+      body: `Ready to visit someone in ${area}. Tap to respond!`,
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        sound: 'default',
+        priority: 'high',
+        channelId: 'community-alerts',
+        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+    },
+    webpush: {
+      headers: {
+        Urgency: 'high',
+      },
+      notification: {
+        title: `${senderName} is Available! 🔔`,
+        body: `Ready to visit someone in ${area}. Tap to respond!`,
+        icon: '/assets/images/app_logo.png',
+        badge: '/assets/images/app_logo.png',
+        vibrate: [200, 100, 200, 100, 200],
+        tag: 'community-alert',
+        renotify: true,
+        requireInteraction: true,
+        sound: 'default',
+      },
+      fcm_options: {
+        link: 'https://finship-app.vercel.app/member-home',
+      },
+    },
+  },
+}),
       }
     );
 
@@ -63,3 +79,4 @@ async function getAccessToken(): Promise<string> {
   const token = await auth.getAccessToken();
   return token!;
 }
+
