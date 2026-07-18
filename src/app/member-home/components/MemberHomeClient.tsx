@@ -663,43 +663,6 @@ const handleSendAlert = async () => {
               )}
             </div>
 
-            {/* TEMP SOUND TEST */}
-<button
-  onClick={() => {
-    try {
-      const AC = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AC();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.5);
-      alert('Sound played! Did you hear it?');
-    } catch(e) {
-      alert('Error: ' + e);
-    }
-  }}
-  className="w-full py-2 bg-blue-500 text-white rounded-xl text-sm mt-2"
->
-  Test Sound
-</button>
-
-            {/* TEMP DEBUG - remove after testing */}
-<button
-  onClick={async () => {
-    const reg = await navigator.serviceWorker.getRegistrations();
-    const swStatus = reg.map(r => r.active?.scriptURL).join(', ');
-    const perm = Notification.permission;
-    alert(`Permission: ${perm}\nSW: ${swStatus || 'none registered'}`);
-  }}
-  className="w-full py-2 bg-gray-200 text-gray-800 rounded-xl text-sm mt-2"
->
-  Check SW Status
-</button>
 
             {/* My Location Card */}
             <div className="bg-card border border-border rounded-2xl p-4">
