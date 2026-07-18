@@ -17,23 +17,36 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || 'New Alert';
+  const title = payload.notification?.title || 'Community Visit Alert';
   const body = payload.notification?.body || 'Someone is available!';
-  self.registration.showNotification(title, {
+
+  const options = {
     body,
     icon: '/assets/images/app_logo.png',
     badge: '/assets/images/app_logo.png',
-    vibrate: [200, 100, 200, 100, 200, 100, 200],
-    tag: 'community-alert',
+    vibrate: [500, 200, 500, 200, 500, 200, 500],
+    tag: 'community-alert-' + Date.now(),
     renotify: true,
     requireInteraction: true,
-  });
+    silent: false,
+    sound: 'default',
+    data: { url: 'https://finship-app.vercel.app/member-home' },
+  };
+
+  self.registration.showNotification(title, options);
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.openWindow('https://finship-app.vercel.app/member-home')
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes('finship-app.vercel.app') && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return clients.openWindow('https://finship-app.vercel.app/member-home');
+    })
   );
 });
 `;
@@ -43,7 +56,7 @@ self.addEventListener('notificationclick', (event) => {
       'Content-Type': 'application/javascript',
       'Content-Security-Policy': "script-src 'self' https://www.gstatic.com",
       'Service-Worker-Allowed': '/',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
     },
   });
 }
