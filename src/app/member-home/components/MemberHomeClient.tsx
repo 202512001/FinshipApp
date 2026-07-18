@@ -257,15 +257,33 @@ useEffect(() => { setMounted(true); }, []);
   // Realtime: new alerts
   useEffect(() => {
     if (!currentMember) return;
-    return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
-      const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
-      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
-      setActiveTab('home');
-      setBeeping(true);
-      playAlertSound();
-      if (beepRef.current) clearTimeout(beepRef.current);
-      beepRef.current = setTimeout(() => setBeeping(false), 6000);
-    });
+  return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+  const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
+  setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
+  setActiveTab('home');
+  setBeeping(true);
+  
+  // Play sound
+  playAlertSound();
+  
+  // Also show browser notification — works even in background tabs
+  if (Notification.permission === 'granted') {
+    const notification = new Notification(`${mappedAlert.senderName} is Available! 🔔`, {
+      body: `Ready to visit someone in ${mappedAlert.senderArea}. Tap to respond!`,
+      icon: '/assets/images/app_logo.png',
+      tag: 'community-alert',
+      renotify: true,
+      requireInteraction: true,
+    } as any);
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+  }
+  
+  if (beepRef.current) clearTimeout(beepRef.current);
+  beepRef.current = setTimeout(() => setBeeping(false), 6000);
+});
   }, [currentMember, sameGenderMembers, playAlertSound]);
 
   // Realtime: alert responses
