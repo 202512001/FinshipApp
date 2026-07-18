@@ -293,20 +293,39 @@ useEffect(() => { setMounted(true); }, []);
     return () => { supabase.removeChannel(channel); };
   }, [currentMember]);
 
-  // Init AudioContext on first touch
-  useEffect(() => {
-    const initAudio = () => {
-      if (!audioCtxRef.current) {
-        const AC = window.AudioContext || (window as any).webkitAudioContext;
-        if (AC) audioCtxRef.current = new AC();
+useEffect(() => {
+  // Try to initialize immediately
+  const AC = window.AudioContext || (window as any).webkitAudioContext;
+  if (AC) {
+    try {
+      audioCtxRef.current = new AC();
+    } catch {
+      // Will initialize on first gesture
+    }
+  }
+
+  // Also listen for gesture as fallback
+  const initAudio = () => {
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+      if (AC) {
+        try {
+          audioCtxRef.current = new AC();
+        } catch {}
       }
-      document.removeEventListener('touchstart', initAudio);
-      document.removeEventListener('click', initAudio);
-    };
-    document.addEventListener('touchstart', initAudio);
-    document.addEventListener('click', initAudio);
-    return () => { document.removeEventListener('touchstart', initAudio); document.removeEventListener('click', initAudio); };
-  }, []);
+    }
+    if (audioCtxRef.current?.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+  };
+
+  document.addEventListener('touchstart', initAudio, { passive: true });
+  document.addEventListener('click', initAudio);
+
+  return () => {
+    document.removeEventListener('touchstart', initAudio);
+    document.removeEventListener('click', initAudio);
+  };
+}, []);
 
   // Cleanup
   useEffect(() => {
