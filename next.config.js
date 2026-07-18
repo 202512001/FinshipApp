@@ -9,11 +9,15 @@ const nextConfig = {
       headers: [
         {
           key: 'Content-Security-Policy',
-          value: "script-src 'self' https://www.gstatic.com",
+          value: "default-src 'self'; script-src 'self' https://www.gstatic.com; connect-src 'self' https://*.googleapis.com https://fcm.googleapis.com",
         },
         {
           key: 'Service-Worker-Allowed',
           value: '/',
+        },
+        {
+          key: 'Cache-Control',
+          value: 'no-cache',
         },
       ],
     },
