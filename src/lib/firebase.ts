@@ -24,24 +24,37 @@ export async function getMessagingInstance() {
 export async function requestNotificationPermission(): Promise<string | null> {
   try {
     if (typeof window === 'undefined') return null;
-    const messaging = await getMessagingInstance();
-    if (!messaging) {
-      console.error('FCM: messaging not supported');
+    
+    // Check if notifications are supported
+    if (!('Notification' in window)) return null;
+    if (!('serviceWorker' in navigator)) return null;
+
+    // Request permission first
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+
+    // Register service worker manually
+    let swRegistration: ServiceWorkerRegistration;
+    try {
+      swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+        scope: '/',
+      });
+      await navigator.serviceWorker.ready;
+    } catch (swErr) {
       return null;
     }
 
-    const permission = await Notification.requestPermission();
-    console.log('FCM: permission status:', permission);
-    if (permission !== 'granted') return null;
+    // Now get messaging with the registration
+    const messaging = await getMessagingInstance();
+    if (!messaging) return null;
 
     const token = await getToken(messaging, {
       vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: swRegistration,
     });
 
-    console.log('FCM: token generated:', token ? 'YES' : 'NO - token is empty');
     return token || null;
   } catch (err) {
-    console.error('FCM: token error:', err);
     return null;
   }
 }
