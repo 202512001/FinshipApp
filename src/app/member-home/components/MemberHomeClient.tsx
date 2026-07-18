@@ -2,22 +2,7 @@
 import { supabase } from "../../../lib/supabase";
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  Bell,
-  Users,
-  MapPin,
-  Clock,
-  CheckCircle,
-  XCircle,
-  Volume2,
-  VolumeX,
-  LogOut,
-  Shield,
-  Home,
-  AlertCircle,
-  Navigation,
-  ChevronRight,
-} from 'lucide-react';
+import { Bell, Users, MapPin, Clock, CheckCircle, XCircle, Volume2, VolumeX, LogOut, Shield, Home, AlertCircle, Navigation, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { Lock, Eye, EyeOff } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -25,34 +10,15 @@ import { verifyAdminPassword } from '../../../lib/services/adminAuth';
 import Badge from '../../../components/ui/Badge';
 import Modal from '../../../components/ui/Modal';
 import AppLogo from '../../../components/ui/AppLogo';
-import { type Member, type Alert, type CommunityRecord } from '../../../lib/mockData';
+import { type Alert } from '../../../lib/mockData';
 import { getCommunityRecordsByGender } from '../../../lib/services/community';
-import { getApprovedProfilesByGender } from '../../../lib/services/profile';
-//claude
-import {
-  acknowledgeAlert,
-  createAlert,
-  getAlertHistory,
-  getAvailabilityExpiresAt,
-  subscribeToNewAvailabilityAlerts,
-  updateAlertStatus,
-  getAcceptedMembers,
-  formGroup,
-  getGroupWithMembers,
-  getMyActiveGroup,
-  subscribeToGroupFormed,
-   sendPushNotificationsToArea,
-} from '../../../lib/services/alerts';
+import { getApprovedProfilesByGender, deleteMyAccount, saveFcmToken } from '../../../lib/services/profile';
+import { acknowledgeAlert, createAlert, getAlertHistory, getAvailabilityExpiresAt, subscribeToNewAvailabilityAlerts, updateAlertStatus, getAcceptedMembers, formGroup, getGroupWithMembers, getMyActiveGroup, subscribeToGroupFormed, sendPushNotificationsToArea } from '../../../lib/services/alerts';
 import GroupSuggestions from './GroupSuggestions';
-//-------------------
-import GroupPanel from './GroupPanel';
-import VisitRecommendation from './VisitRecommendation';
 import NotificationFeed from './NotificationFeed';
-import { deleteMyAccount } from '../../../lib/services/profile';
 import { requestNotificationPermission, onForegroundMessage } from '../../../lib/firebase';
-import { saveFcmToken } from '../../../lib/services/profile';
 
-const ALERT_DURATION_SECONDS = 3 * 60; // 3 minutes
+const ALERT_DURATION_SECONDS = 3 * 60;
 
 function getSecondsRemaining(createdAt: string): number {
   const created = new Date(createdAt).getTime();
@@ -61,11 +27,9 @@ function getSecondsRemaining(createdAt: string): number {
 }
 
 function toMemberHomeAlert(row: any, currentMember: any, members: any[]): Alert {
-  const sender =
-    row.sender_id === currentMember.id
-      ? currentMember
-      : members.find((member) => member.id === row.sender_id);
-
+  const sender = row.sender_id === currentMember.id
+    ? currentMember
+    : members.find((m: any) => m.id === row.sender_id);
   return {
     id: row.id,
     senderId: row.sender_id,
@@ -79,452 +43,255 @@ function toMemberHomeAlert(row: any, currentMember: any, members: any[]): Alert 
     status: row.status,
   };
 }
-
 export default function MemberHomeClient() {
   const router = useRouter();
+  const adminForm = useForm<{ password: string }>();
 
+  // STATE
   const [currentMember, setCurrentMember] = useState<any>(null);
   const [sameGenderMembers, setSameGenderMembers] = useState<any[]>([]);
   const [communityRecords, setCommunityRecords] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const storedUser = localStorage.getItem('cv_user');
-    
-    if (!storedUser) {
-      router.replace('/sign-up-login-screen');
-      return;
-    }
-    setCurrentMember(JSON.parse(storedUser));
-  }, [router]);
-
-  useEffect(() => {
-    if (!currentMember) return;
-
-    async function loadMembers() {
-      try {
-        const members = await getApprovedProfilesByGender(currentMember.gender);
-        setSameGenderMembers(members.filter((m: any) => m.id !== currentMember.id));
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    loadMembers();
-
-    async function loadCommunityRecords() {
-      try {
-        const records = await getCommunityRecordsByGender(currentMember.gender);
-        const formatted = records.map((r: any) => ({
-          ...r,
-          area: r.areas?.name ?? '',
-          visitCount: r.visit_count,
-          lastVisitedDate: r.last_visited_date,
-        }));
-        setCommunityRecords(formatted);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    loadCommunityRecords();
-  }, [currentMember]);
-
-  // Request notification permission and save FCM token
-useEffect(() => {
-  if (!currentMember) return;
-
-  requestNotificationPermission().then((token) => {
-    if (token) {
-      saveFcmToken(currentMember.id, token).catch(() => {});
-    }
-  });
-
-  onForegroundMessage((payload) => {
-    playAlertSound();
-    toast(`📢 ${payload.notification?.title}`, { duration: 8000 });
-  });
-}, [currentMember?.id]);
-
   const [activeTab, setActiveTab] = useState<'home' | 'group' | 'notifications'>('home');
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isSendingAlert, setIsSendingAlert] = useState(false);
   const [hasActiveAlert, setHasActiveAlert] = useState(false);
-  const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [groupFormed, setGroupFormed] = useState(false);
-  const [recommendedPerson, setRecommendedPerson] = useState<CommunityRecord | null>(null);
   const [logoutModal, setLogoutModal] = useState(false);
   const [beeping, setBeeping] = useState(false);
-  const beepRef = useRef<NodeJS.Timeout | null>(null);
   const [myAlert, setMyAlert] = useState<any>(null);
   const [acceptedMembers, setAcceptedMembers] = useState<any[]>([]);
   const [respondedAlerts, setRespondedAlerts] = useState<string[]>([]);
-  //claude
   const [groupPopupVisible, setGroupPopupVisible] = useState(false);
-const [formedGroupMembers, setFormedGroupMembers] = useState<any[]>([]);
-const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-const groupSubscriptionRef = useRef<(() => void) | null>(null);
-const watchingAlertIdRef = useRef<string | null>(null);
-
-const [groupAreaId, setGroupAreaId] = useState<string | null>(null);
-const [groupGender, setGroupGender] = useState<string | null>(null);
-const [showAdminModal, setShowAdminModal] = useState(false);
-const [showAdminPass, setShowAdminPass] = useState(false);
-const [adminLoading, setAdminLoading] = useState(false);
-const adminForm = useForm<{ password: string }>();
-  //----
-
-  // Separate countdown states: one for my outgoing alert, one for incoming alert
+  const [formedGroupMembers, setFormedGroupMembers] = useState<any[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [groupAreaId, setGroupAreaId] = useState<string | null>(null);
+  const [groupGender, setGroupGender] = useState<string | null>(null);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(false);
   const [myAlertCountdown, setMyAlertCountdown] = useState(0);
   const [incomingAlertCountdown, setIncomingAlertCountdown] = useState(0);
+  const [mounted, setMounted] = useState(false);
+
+  // REFS
+  const beepRef = useRef<NodeJS.Timeout | null>(null);
   const myCountdownRef = useRef<NodeJS.Timeout | null>(null);
   const incomingCountdownRef = useRef<NodeJS.Timeout | null>(null);
-const currentMemberRef = useRef<any>(null);
-  // Derived: active incoming alert (same area + gender, not mine)
+  const groupSubscriptionRef = useRef<(() => void) | null>(null);
+  const watchingAlertIdRef = useRef<string | null>(null);
+  const currentMemberRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const handleGroupFormedRef = useRef<any>(null);
+// DERIVED
   const incomingAlert = currentMember
-    ? alerts.find(
-        (a) =>
-          a.status === 'active' &&
-          a.senderId !== currentMember.id &&
-          a.gender === currentMember.gender
-      )
+    ? alerts.find((a) => a.status === 'active' && a.senderId !== currentMember.id && a.gender === currentMember.gender)
     : undefined;
-
-  // Derived: my own active alert
   const myActiveAlert = currentMember
-    ? alerts.find(
-        (a) =>
-          a.status === 'active' &&
-          a.senderId === currentMember.id
-      )
+    ? alerts.find((a) => a.status === 'active' && a.senderId === currentMember.id)
     : undefined;
+  const showIncomingBanner = !!incomingAlert && incomingAlertCountdown > 0;
 
-
-   //claude add new
-      // Load existing active group on mount (within 8 hours)
-useEffect(() => {
-  if (!currentMember) return;
-
-  async function loadActiveGroup() {
+  // CALLBACKS — defined before ALL useEffects
+  const playAlertSound = useCallback(() => {
+    if (!soundEnabled) return;
     try {
-      const group = await getMyActiveGroup(currentMember.id);
-      if (group) {
-  const members = await getGroupWithMembers(group.id);
-  setFormedGroupMembers(members);
-  setActiveGroupId(group.id);
-  setGroupFormed(true);
-  setGroupAreaId(currentMember.area_id);
-  setGroupGender(currentMember.gender);
-}
-    } catch (err) {
-      console.error(err);
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (!audioCtxRef.current && AC) audioCtxRef.current = new AC();
+      const audioCtx = audioCtxRef.current;
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const beep = (startTime: number) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, startTime);
+        osc.frequency.setValueAtTime(660, startTime + 0.1);
+        osc.frequency.setValueAtTime(880, startTime + 0.2);
+        gain.gain.setValueAtTime(0.3, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.5);
+        osc.start(startTime);
+        osc.stop(startTime + 0.5);
+      };
+      for (let i = 0; i < 10; i++) beep(audioCtx.currentTime + i * 0.6);
+    } catch {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
     }
-  }
-  loadActiveGroup();
-}, [currentMember]);
+  }, [soundEnabled]);
 
-   //--------- 
+  const handleGroupFormed = useCallback(async (groupId: string) => {
+    try {
+      const members = await getGroupWithMembers(groupId);
+      setFormedGroupMembers(members);
+      setActiveGroupId(groupId);
+      setGroupFormed(true);
+      setGroupPopupVisible(true);
+      setHasActiveAlert(false);
+      setMyAlert(null);
+      const member = currentMemberRef.current;
+      if (member) { setGroupAreaId(member.area_id); setGroupGender(member.gender); }
+      setTimeout(() => { setGroupPopupVisible(false); setActiveTab('group'); }, 3000);
+    } catch (err) { console.error('Error loading group members:', err); }
+  }, []);
 
+  handleGroupFormedRef.current = handleGroupFormed;
+useEffect(() => { setMounted(true); }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedUser = localStorage.getItem('cv_user');
+    if (!storedUser) { router.replace('/sign-up-login-screen'); return; }
+    setCurrentMember(JSON.parse(storedUser));
+  }, [router]);
 
-  // Load alert history on mount
+  useEffect(() => { currentMemberRef.current = currentMember; }, [currentMember]);
+
   useEffect(() => {
     if (!currentMember) return;
-    
+    getApprovedProfilesByGender(currentMember.gender)
+      .then((members) => setSameGenderMembers(members.filter((m: any) => m.id !== currentMember.id)))
+      .catch(console.error);
+    getCommunityRecordsByGender(currentMember.gender)
+      .then((records) => setCommunityRecords(records.map((r: any) => ({ ...r, area: r.areas?.name ?? '', visitCount: r.visit_count, lastVisitedDate: r.last_visited_date }))))
+      .catch(console.error);
+  }, [currentMember]);
 
-    async function loadAvailabilityRequests() {
-      try {
-        const history = await getAlertHistory(currentMember.area_id, currentMember.gender);
-        const mappedAlerts = history.map((alert) =>
-          toMemberHomeAlert(alert, currentMember, sameGenderMembers)
-        );
-        setAlerts(mappedAlerts);
+  useEffect(() => {
+    if (!currentMember) return;
+    requestNotificationPermission().then((token) => {
+      if (token) saveFcmToken(currentMember.id, token).catch(() => {});
+    });
+    onForegroundMessage((payload) => {
+      playAlertSound();
+      toast(`📢 ${payload.notification?.title}`, { duration: 8000 });
+    });
+  }, [currentMember?.id, playAlertSound]);
 
-        const myActive = mappedAlerts.find(
-          (a) => a.status === 'active' && a.senderId === currentMember.id
-        );
-        setHasActiveAlert(!!myActive);
-
-        // Restore myAlert raw row for accepted members tracking
-        if (myActive) {
-          const rawRow = history.find((r: any) => r.id === myActive.id);
-          if (rawRow) setMyAlert(rawRow);
-        }
-      } catch (err) {
-        console.error(err);
+  useEffect(() => {
+    if (!currentMember) return;
+    getMyActiveGroup(currentMember.id).then(async (group) => {
+      if (group) {
+        const members = await getGroupWithMembers(group.id);
+        setFormedGroupMembers(members);
+        setActiveGroupId(group.id);
+        setGroupFormed(true);
+        setGroupAreaId(currentMember.area_id);
+        setGroupGender(currentMember.gender);
       }
-    }
-    loadAvailabilityRequests();
+    }).catch(console.error);
+  }, [currentMember]);
+
+  useEffect(() => {
+    if (!currentMember) return;
+    getAlertHistory(currentMember.area_id, currentMember.gender).then((history) => {
+      const mappedAlerts = history.map((a: any) => toMemberHomeAlert(a, currentMember, sameGenderMembers));
+      setAlerts(mappedAlerts);
+      const myActive = mappedAlerts.find((a) => a.status === 'active' && a.senderId === currentMember.id);
+      setHasActiveAlert(!!myActive);
+      if (myActive) { const rawRow = history.find((r: any) => r.id === myActive.id); if (rawRow) setMyAlert(rawRow); }
+    }).catch(console.error);
   }, [currentMember, sameGenderMembers]);
 
-  useEffect(() => {
-  currentMemberRef.current = currentMember;
-}, [currentMember]);
-  // When I'm watching an incoming alert, subscribe to group formation on it
-/*useEffect(() => {
-  if (groupSubscriptionRef.current) {
-    groupSubscriptionRef.current();
-    groupSubscriptionRef.current = null;
-  }
-
-  if (!incomingAlert) return;
-
-  const unsub = subscribeToGroupFormed(incomingAlert.id, (groupId) => {
-    handleGroupFormed(groupId);
-  });
-  groupSubscriptionRef.current = unsub;
-
-  return () => {
-    if (groupSubscriptionRef.current) {
-      groupSubscriptionRef.current();
-      groupSubscriptionRef.current = null;
-    }
-  };
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [incomingAlert?.id]);*/
-
-  // Countdown for MY outgoing alert — calculated from alert's created_at
+  // Sender countdown
   useEffect(() => {
     if (myCountdownRef.current) clearInterval(myCountdownRef.current);
-
-    if (!myActiveAlert) {
-      setMyAlertCountdown(0);
-      return;
-    }
-
+    if (!myActiveAlert) { setMyAlertCountdown(0); return; }
     const tick = () => {
       const remaining = getSecondsRemaining(myActiveAlert.sentAt);
       setMyAlertCountdown(remaining);
- if (remaining === 0) {
-  if (myCountdownRef.current) clearInterval(myCountdownRef.current);
-
-  if (!currentMember?.id) {
-    console.error('❌ currentMember is null at timer end');
-    return;
-  }
-
-  formGroup(myActiveAlert.id, currentMember.id)
-    .then(async (groupId) => {
-    
-      if (groupId) {
-        await handleGroupFormedRef.current(groupId);
-      } else {
-        updateAlertStatus(myActiveAlert.id, 'expired').catch(console.error);
-        setAlerts((prev) =>
-          prev.map((a) => (a.id === myActiveAlert.id ? { ...a, status: 'expired' } : a))
-        );
-        setHasActiveAlert(false);
-        setMyAlert(null);
-       toast('Nobody is available to go at this moment. Try again later! 🕊️', {
-  duration: 5000,
-});
+      if (remaining === 0) {
+        if (myCountdownRef.current) clearInterval(myCountdownRef.current);
+        if (!currentMember?.id) return;
+        formGroup(myActiveAlert.id, currentMember.id).then(async (groupId) => {
+          if (groupId) { await handleGroupFormedRef.current(groupId); }
+          else {
+            updateAlertStatus(myActiveAlert.id, 'expired').catch(console.error);
+            setAlerts((prev) => prev.map((a) => a.id === myActiveAlert.id ? { ...a, status: 'expired' } : a));
+            setHasActiveAlert(false); setMyAlert(null);
+            toast('Nobody is available to go at this moment. Try again later! 🕊️', { duration: 5000 });
+          }
+        }).catch(console.error);
       }
-    })
-    .catch((err) => {
-      console.error('❌ formGroup threw an error:', err);
-      console.error('Error details:', JSON.stringify(err, null, 2));
-    });
-}
     };
     tick();
     myCountdownRef.current = setInterval(tick, 1000);
-    return () => {
-      if (myCountdownRef.current) clearInterval(myCountdownRef.current);
-    };
-   }, [myActiveAlert?.id, myActiveAlert?.sentAt, currentMember?.id]);
+    return () => { if (myCountdownRef.current) clearInterval(myCountdownRef.current); };
+  }, [myActiveAlert?.id, myActiveAlert?.sentAt, currentMember?.id]);
 
-  // Countdown for INCOMING alert — calculated from alert's created_at (consistent after refresh)
+  // Receiver countdown
   useEffect(() => {
     if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
-
-    if (!incomingAlert) {
-      setIncomingAlertCountdown(0);
-      return;
-    }
-
+    if (!incomingAlert) { setIncomingAlertCountdown(0); return; }
     const tick = () => {
       const remaining = getSecondsRemaining(incomingAlert.sentAt);
       setIncomingAlertCountdown(remaining);
       if (remaining === 0) {
         if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
-        // Mark as expired locally
-        setAlerts((prev) =>
-          prev.map((a) => (a.id === incomingAlert.id ? { ...a, status: 'expired' } : a))
-        );
+        setAlerts((prev) => prev.map((a) => a.id === incomingAlert.id ? { ...a, status: 'expired' } : a));
       }
     };
     tick();
     incomingCountdownRef.current = setInterval(tick, 1000);
-    return () => {
-      if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
-    };
+    return () => { if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current); };
   }, [incomingAlert?.id, incomingAlert?.sentAt]);
 
-  // Real-time subscription for new alerts (same area + gender)
+  // Realtime: new alerts
   useEffect(() => {
     if (!currentMember) return;
-
-    /*return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
+    return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
       const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
-      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);*/
+      setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
+      setActiveTab('home');
+      setBeeping(true);
+      playAlertSound();
+      if (beepRef.current) clearTimeout(beepRef.current);
+      beepRef.current = setTimeout(() => setBeeping(false), 6000);
+    });
+  }, [currentMember, sameGenderMembers, playAlertSound]);
 
-   return subscribeToNewAvailabilityAlerts(currentMember, (newAlert) => {
-  const mappedAlert = toMemberHomeAlert(newAlert, currentMember, sameGenderMembers);
-  setAlerts((prev) => [mappedAlert, ...prev.filter((a) => a.id !== mappedAlert.id)]);
-  // Switch to home tab so banner is visible
-  setActiveTab('home');
-  setBeeping(true);
-  playAlertSound();
-  if (beepRef.current) clearTimeout(beepRef.current);
-  beepRef.current = setTimeout(() => setBeeping(false), 5000);
-});
-     /* if (soundEnabled) {
-        setBeeping(true);
-        if (beepRef.current) clearTimeout(beepRef.current);
-        beepRef.current = setTimeout(() => setBeeping(false), 5000);
-      }
-    });*/
-  }, [currentMember, sameGenderMembers, soundEnabled]);
-
-  // Real-time subscription for alert_responses on MY alert
+  // Realtime: alert responses
   useEffect(() => {
     if (!currentMember || !myAlert) return;
-
-    const channel = supabase
-      .channel(`responses-${myAlert.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'alert_responses',
-          filter: `alert_id=eq.${myAlert.id}`,
-        },
-        async () => {
-          try {
-            const accepted = await getAcceptedMembers(myAlert.id);
-            setAcceptedMembers(accepted);
-          } catch (err) {
-            console.error(err);
-          }
-        }
-      )
+    const channel = supabase.channel(`responses-${myAlert.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alert_responses', filter: `alert_id=eq.${myAlert.id}` },
+        async () => { getAcceptedMembers(myAlert.id).then(setAcceptedMembers).catch(console.error); })
       .subscribe();
-
-    // Load initial accepted members
-    getAcceptedMembers(myAlert.id)
-      .then(setAcceptedMembers)
-      .catch(console.error);
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    getAcceptedMembers(myAlert.id).then(setAcceptedMembers).catch(console.error);
+    return () => { supabase.removeChannel(channel); };
   }, [myAlert?.id]);
 
-  // Real-time subscription for alert status changes (e.g., expired by another client)
+  // Realtime: alert status updates
   useEffect(() => {
     if (!currentMember) return;
-
-    const channel = supabase
-      .channel(`alert-status-${currentMember.area_id}-${currentMember.gender}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'alerts',
-        },
-        (payload) => {
-          const updated = payload.new as any;
-          if (
-            updated.area_id === currentMember.area_id &&
-            updated.gender === currentMember.gender
-          ) {
-            setAlerts((prev) =>
-              prev.map((a) => (a.id === updated.id ? { ...a, status: updated.status } : a))
-            );
-            if (updated.sender_id === currentMember.id && updated.status !== 'active') {
-              setHasActiveAlert(false);
-              setMyAlert(null);
-            }
-          }
+    const channel = supabase.channel(`alert-status-${currentMember.area_id}-${currentMember.gender}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'alerts' }, (payload) => {
+        const updated = payload.new as any;
+        if (updated.area_id === currentMember.area_id && updated.gender === currentMember.gender) {
+          setAlerts((prev) => prev.map((a) => a.id === updated.id ? { ...a, status: updated.status } : a));
+          if (updated.sender_id === currentMember.id && updated.status !== 'active') { setHasActiveAlert(false); setMyAlert(null); }
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      }).subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [currentMember]);
 
-  /* const handleGroupFormed = useCallback(async (groupId: string) => {
-  try {
-    const members = await getGroupWithMembers(groupId);*/
-const playAlertSound = useCallback(() => {
-  if (!soundEnabled) return;
-  try {
-    const AC = window.AudioContext || (window as any).webkitAudioContext;
-    if (!audioCtxRef.current && AC) {
-      audioCtxRef.current = new AC();
-    }
-    const audioCtx = audioCtxRef.current;
-    if (!audioCtx) return;
-
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-
-    const beep = (startTime: number) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, startTime);
-      osc.frequency.setValueAtTime(660, startTime + 0.1);
-      osc.frequency.setValueAtTime(880, startTime + 0.2);
-      gain.gain.setValueAtTime(0.3, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.5);
-      osc.start(startTime);
-      osc.stop(startTime + 0.5);
+  // Init AudioContext on first touch
+  useEffect(() => {
+    const initAudio = () => {
+      if (!audioCtxRef.current) {
+        const AC = window.AudioContext || (window as any).webkitAudioContext;
+        if (AC) audioCtxRef.current = new AC();
+      }
+      document.removeEventListener('touchstart', initAudio);
+      document.removeEventListener('click', initAudio);
     };
+    document.addEventListener('touchstart', initAudio);
+    document.addEventListener('click', initAudio);
+    return () => { document.removeEventListener('touchstart', initAudio); document.removeEventListener('click', initAudio); };
+  }, []);
 
-    for (let i = 0; i < 10; i++) {
-      beep(audioCtx.currentTime + i * 0.6);
-    }
-  } catch {
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
-  }
-}, [soundEnabled]);
-
-    const handleGroupFormed = useCallback(async (groupId: string) => {
-  try {
-    const members = await getGroupWithMembers(groupId);
-    setFormedGroupMembers(members);
-    setActiveGroupId(groupId);
-    setGroupFormed(true);
-    setGroupPopupVisible(true);
-    setHasActiveAlert(false);
-    setMyAlert(null);
-    // Use ref instead of currentMember to avoid stale closure
-    const member = currentMemberRef.current;
-    if (member) {
-      setGroupAreaId(member.area_id);
-      setGroupGender(member.gender);
-    }
-    setTimeout(() => {
-      setGroupPopupVisible(false);
-      setActiveTab('group');
-    }, 3000);
-  } catch (err) {
-    console.error('Error loading group members:', err);
-  }
-}, [setFormedGroupMembers, setActiveGroupId, setGroupFormed,
-    setGroupPopupVisible, setHasActiveAlert, setMyAlert, setActiveTab]);
-
-
-const handleGroupFormedRef = useRef(handleGroupFormed);
-useEffect(() => {
-  handleGroupFormedRef.current = handleGroupFormed;
-}, [handleGroupFormed]);
-
+  // Cleanup
   useEffect(() => {
     return () => {
       if (beepRef.current) clearTimeout(beepRef.current);
@@ -532,27 +299,7 @@ useEffect(() => {
       if (incomingCountdownRef.current) clearInterval(incomingCountdownRef.current);
     };
   }, []);
-
- const audioCtxRef = useRef<AudioContext | null>(null);
-
-useEffect(() => {
-  const initAudio = () => {
-    if (!audioCtxRef.current) {
-      const AC = window.AudioContext || (window as any).webkitAudioContext;
-      if (AC) audioCtxRef.current = new AC();
-    }
-    document.removeEventListener('touchstart', initAudio);
-    document.removeEventListener('click', initAudio);
-  };
-  document.addEventListener('touchstart', initAudio);
-  document.addEventListener('click', initAudio);
-  return () => {
-    document.removeEventListener('touchstart', initAudio);
-    document.removeEventListener('click', initAudio);
-  };
-}, []);
-
-  const handleSendAlert = async () => {
+const handleSendAlert = async () => {
     if (!currentMember) return;
     setIsSendingAlert(true);
     try {
@@ -560,46 +307,65 @@ useEffect(() => {
       const alert = toMemberHomeAlert(result.alert, currentMember, sameGenderMembers);
       setMyAlert(result.alert);
       setAlerts((prev) => [alert, ...prev.filter((item) => item.id !== alert.id)]);
-
-     if (result.created) {
-  setHasActiveAlert(true);
-  toast.success('Availability alert sent! Waiting for members to accept (3 minutes)...');
-
-  // Send push notifications to all members
-  sendPushNotificationsToArea(
-    currentMember.area_id,
-    currentMember.gender,
-    currentMember.id,
-    currentMember.name,
-    currentMember.area ?? ''
-  );
-} else {
-  toast(result.message);
-}
-    } catch (err) {
-      console.error(err);
-      toast.error('Unable to send availability request');
-    } finally {
-      setIsSendingAlert(false);
-    }
+      if (result.created) {
+        setHasActiveAlert(true);
+        toast.success('Availability alert sent! Waiting for members to accept (3 minutes)...');
+        sendPushNotificationsToArea(currentMember.area_id, currentMember.gender, currentMember.id, currentMember.name, currentMember.area ?? '');
+      } else { toast(result.message); }
+    } catch { toast.error('Unable to send availability request'); }
+    finally { setIsSendingAlert(false); }
   };
 
   const handleAcceptAlert = async (alertId: string) => {
+    if (!currentMember) return;
+    try {
+      await acknowledgeAlert(alertId, currentMember.id, 'accepted');
+      setRespondedAlerts((prev) => [...prev, alertId]);
+      setAlerts((prev) => prev.map((a) => a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a));
+      const alert = alerts.find((a) => a.id === alertId);
+      if (!alert) return;
+      const secondsLeft = getSecondsRemaining(alert.sentAt);
+      if (secondsLeft <= 0) {
+        toast('Timer has ended. Forming group now...');
+        const groupId = await formGroup(alertId, alert.senderId);
+        if (groupId) await handleGroupFormedRef.current(groupId);
+        return;
+      }
+      toast.success('Accepted! Group will appear when the timer ends.');
+      if (watchingAlertIdRef.current === alertId) return;
+      watchingAlertIdRef.current = alertId;
+      if (groupSubscriptionRef.current) { groupSubscriptionRef.current(); groupSubscriptionRef.current = null; }
+      const unsub = subscribeToGroupFormed(alertId, async (groupId) => {
+        watchingAlertIdRef.current = null;
+        if (groupSubscriptionRef.current) { groupSubscriptionRef.current(); groupSubscriptionRef.current = null; }
+        await handleGroupFormedRef.current(groupId);
+      });
+      groupSubscriptionRef.current = unsub;
+
+      const handleAcceptAlert = async (alertId: string) => {
   if (!currentMember) return;
   try {
     await acknowledgeAlert(alertId, currentMember.id, 'accepted');
     setRespondedAlerts((prev) => [...prev, alertId]);
-    setAlerts((prev) =>
-      prev.map((a) =>
-        a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a
-      )
-    );
+    setAlerts((prev) => prev.map((a) => a.id === alertId ? { ...a, acceptedBy: [...a.acceptedBy, currentMember.id] } : a));
 
     const alert = alerts.find((a) => a.id === alertId);
     if (!alert) return;
 
-    const secondsLeft = getSecondsRemaining(alert.sentAt);
+    // Check if group already exists for this alert
+    const { data: existingGroup } = await supabase
+      .from('groups')
+      .select('id')
+      .eq('alert_id', alertId)
+      .maybeSingle();
 
+    if (existingGroup) {
+      // Group already formed — show it immediately
+      await handleGroupFormedRef.current(existingGroup.id);
+      return;
+    }
+
+    const secondsLeft = getSecondsRemaining(alert.sentAt);
     if (secondsLeft <= 0) {
       toast('Timer has ended. Forming group now...');
       const groupId = await formGroup(alertId, alert.senderId);
@@ -609,76 +375,52 @@ useEffect(() => {
 
     toast.success('Accepted! Group will appear when the timer ends.');
 
-    // Don't subscribe again if already watching this alert
+    if (watchingAlertIdRef.current && watchingAlertIdRef.current !== alertId) {
+      if (groupSubscriptionRef.current) { groupSubscriptionRef.current(); groupSubscriptionRef.current = null; }
+      watchingAlertIdRef.current = null;
+    }
+
     if (watchingAlertIdRef.current === alertId) return;
     watchingAlertIdRef.current = alertId;
 
-    // Clear any old subscription
-    if (groupSubscriptionRef.current) {
-      groupSubscriptionRef.current();
-      groupSubscriptionRef.current = null;
-    }
-
-    // Subscribe — keep this alive until group forms
     const unsub = subscribeToGroupFormed(alertId, async (groupId) => {
-        watchingAlertIdRef.current = null;
-      if (groupSubscriptionRef.current) {
-        groupSubscriptionRef.current();
-        groupSubscriptionRef.current = null;
-      }
+      watchingAlertIdRef.current = null;
+      if (groupSubscriptionRef.current) { groupSubscriptionRef.current(); groupSubscriptionRef.current = null; }
       await handleGroupFormedRef.current(groupId);
     });
-
     groupSubscriptionRef.current = unsub;
-    
-  } catch (err) {
-    console.error('Unable to accept availability request', err);
-    toast.error('Unable to accept availability request');
-  }
-};
 
+  } catch { toast.error('Unable to accept availability request'); }
+};
+    } catch { toast.error('Unable to accept availability request'); }
+  };
+  
   const handleIgnoreAlert = async (alertId: string) => {
     if (!currentMember) return;
     try {
       await acknowledgeAlert(alertId, currentMember.id, 'declined');
       setRespondedAlerts((prev) => [...prev, alertId]);
       toast('Availability request ignored');
-    } catch (err) {
-      console.error('Unable to decline availability request', { alertId, memberId: currentMember.id, error: err });
-      toast.error('Unable to ignore availability request');
-    }
+    } catch { toast.error('Unable to ignore availability request'); }
   };
 
-  const formatCountdown = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
+  const handleAdminAccess = adminForm.handleSubmit(async (data) => {
+    setAdminLoading(true);
+    try {
+      const isValid = await verifyAdminPassword(data.password);
+      if (!isValid) { adminForm.setError('password', { message: 'Incorrect password. Please try again.' }); return; }
+      toast.success('Admin access granted');
+      localStorage.setItem('cv_admin', 'true');
+      setShowAdminModal(false);
+      adminForm.reset();
+      router.push('/admin-panel');
+    } catch { toast.error('Unable to verify password. Try again.'); }
+    finally { setAdminLoading(false); }
+  });
 
-  if (!currentMember) return null;
+  const formatCountdown = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const showIncomingBanner = !!incomingAlert && incomingAlert.status === 'active' && incomingAlertCountdown > 0;
-
-const handleAdminAccess = adminForm.handleSubmit(async (data) => {
-  setAdminLoading(true);
-  try {
-    const isValid = await verifyAdminPassword(data.password);
-    if (!isValid) {
-      adminForm.setError('password', { message: 'Incorrect password. Please try again.' });
-      return;
-    }
-    toast.success('Admin access granted');
-    localStorage.setItem('cv_admin', 'true');
-    setShowAdminModal(false);
-    adminForm.reset();
-    router.push('/admin-panel');
-  } catch (err) {
-    toast.error('Unable to verify password. Try again.');
-  } finally {
-    setAdminLoading(false);
-  }
-});
-
+  if (!mounted || !currentMember) return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-lg mx-auto">

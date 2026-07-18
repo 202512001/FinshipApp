@@ -437,8 +437,13 @@ export function subscribeToGroupFormed(
   alertId: string,
   callback: (groupId: string) => void
 ) {
-  const channelName = `group-formed-${alertId}-${Date.now()}`;
-  
+  // Use unique channel name with timestamp to avoid conflicts
+  const channelName = `group-watch-${alertId}`;
+
+  // Remove existing channel with same name if exists
+  const existing = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
+  if (existing) supabase.removeChannel(existing);
+
   const channel = supabase
     .channel(channelName)
     .on(
@@ -449,14 +454,13 @@ export function subscribeToGroupFormed(
         table: 'groups',
       },
       (payload) => {
-             const group = payload.new as any;
+        const group = payload.new as any;
         if (group.alert_id === alertId) {
           callback(group.id);
         }
       }
     )
-    .subscribe((status) => {
-      });
+    .subscribe();
 
   return () => supabase.removeChannel(channel);
 }
