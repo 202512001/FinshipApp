@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,41 +12,39 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-export async function getMessagingInstance() {
+async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
   try {
-    const supported = await isSupported();
-    if (!supported) return null;
-    return getMessaging(app);
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const reg of registrations) {
+      if (reg.active?.scriptURL.includes('firebase-messaging-sw')) {
+        await reg.unregister();
+      }
+    }
+    const registration = await navigator.serviceWorker.register(
+      '/firebase-messaging-sw.js',
+      { scope: '/' }
+    );
+    await navigator.serviceWorker.ready;
+    return registration;
   } catch {
     return null;
   }
 }
+
 export async function requestNotificationPermission(): Promise<string | null> {
   try {
     if (typeof window === 'undefined') return null;
-    
-    // Check if notifications are supported
     if (!('Notification' in window)) return null;
     if (!('serviceWorker' in navigator)) return null;
 
-    // Request permission first
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return null;
 
-    // Register service worker manually
-    let swRegistration: ServiceWorkerRegistration;
-    try {
-      swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-        scope: '/',
-      });
-      await navigator.serviceWorker.ready;
-    } catch (swErr) {
-      return null;
-    }
+    const swRegistration = await registerServiceWorker();
+    if (!swRegistration) return null;
 
-    // Now get messaging with the registration
-    const messaging = await getMessagingInstance();
-    if (!messaging) return null;
+    const messaging = getMessaging(app);
 
     const token = await getToken(messaging, {
       vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
@@ -54,15 +52,15 @@ export async function requestNotificationPermission(): Promise<string | null> {
     });
 
     return token || null;
-  } catch (err) {
+  } catch {
     return null;
   }
 }
 
 export async function onForegroundMessage(callback: (payload: any) => void) {
   try {
-    const messaging = await getMessagingInstance();
-    if (!messaging) return;
+    if (typeof window === 'undefined') return;
+    const messaging = getMessaging(app);
     onMessage(messaging, callback);
   } catch {
     // silently fail
