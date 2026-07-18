@@ -301,6 +301,16 @@ useEffect(() => { setMounted(true); }, []);
   }, []);
 const handleSendAlert = async () => {
     if (!currentMember) return;
+
+    // Initialize AudioContext on user gesture
+  if (!audioCtxRef.current) {
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (AC) audioCtxRef.current = new AC();
+  }
+  if (audioCtxRef.current?.state === 'suspended') {
+    await audioCtxRef.current.resume();
+  }
+
     setIsSendingAlert(true);
     try {
       const result = await createAlert(currentMember);
@@ -318,6 +328,16 @@ const handleSendAlert = async () => {
 
   const handleAcceptAlert = async (alertId: string) => {
     if (!currentMember) return;
+
+    // Initialize AudioContext on user gesture
+  if (!audioCtxRef.current) {
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (AC) audioCtxRef.current = new AC();
+  }
+  if (audioCtxRef.current?.state === 'suspended') {
+    await audioCtxRef.current.resume();
+  }
+  
     try {
       await acknowledgeAlert(alertId, currentMember.id, 'accepted');
       setRespondedAlerts((prev) => [...prev, alertId]);
