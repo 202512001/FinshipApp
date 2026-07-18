@@ -394,7 +394,7 @@ const handleSendAlert = async () => {
 };
     } catch { toast.error('Unable to accept availability request'); }
   };
-  
+
   const handleIgnoreAlert = async (alertId: string) => {
     if (!currentMember) return;
     try {
@@ -588,6 +588,19 @@ const handleSendAlert = async () => {
                 </p>
               )}
             </div>
+
+            {/* TEMP DEBUG - remove after testing */}
+<button
+  onClick={async () => {
+    const reg = await navigator.serviceWorker.getRegistrations();
+    const swStatus = reg.map(r => r.active?.scriptURL).join(', ');
+    const perm = Notification.permission;
+    alert(`Permission: ${perm}\nSW: ${swStatus || 'none registered'}`);
+  }}
+  className="w-full py-2 bg-gray-200 text-gray-800 rounded-xl text-sm mt-2"
+>
+  Check SW Status
+</button>
 
             {/* My Location Card */}
             <div className="bg-card border border-border rounded-2xl p-4">
@@ -868,6 +881,7 @@ const handleSendAlert = async () => {
         </>
       )}
     </button>
+    
   </form>
 </Modal>
     </div>
