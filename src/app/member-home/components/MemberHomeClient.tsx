@@ -93,14 +93,24 @@ export default function MemberHomeClient() {
   const showIncomingBanner = !!incomingAlert && incomingAlertCountdown > 0;
 
   // CALLBACKS — defined before ALL useEffects
-  const playAlertSound = useCallback(() => {
-    if (!soundEnabled) return;
-    try {
-      const AC = window.AudioContext || (window as any).webkitAudioContext;
-      if (!audioCtxRef.current && AC) audioCtxRef.current = new AC();
-      const audioCtx = audioCtxRef.current;
-      if (!audioCtx) return;
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+ const playAlertSound = useCallback(() => {
+  if (!soundEnabled) return;
+  try {
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AC) {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+      return;
+    }
+    
+    // Always create fresh context if needed
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+      audioCtxRef.current = new AC();
+    }
+    
+    const audioCtx = audioCtxRef.current;
+    
+    // Resume if suspended
+    const playBeeps = () => {
       const beep = (startTime: number) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -116,10 +126,17 @@ export default function MemberHomeClient() {
         osc.stop(startTime + 0.5);
       };
       for (let i = 0; i < 10; i++) beep(audioCtx.currentTime + i * 0.6);
-    } catch {
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+    };
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(playBeeps);
+    } else {
+      playBeeps();
     }
-  }, [soundEnabled]);
+  } catch {
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+  }
+}, [soundEnabled]);
 
   const handleGroupFormed = useCallback(async (groupId: string) => {
     try {
@@ -337,7 +354,7 @@ const handleSendAlert = async () => {
   if (audioCtxRef.current?.state === 'suspended') {
     await audioCtxRef.current.resume();
   }
-  
+
     try {
       await acknowledgeAlert(alertId, currentMember.id, 'accepted');
       setRespondedAlerts((prev) => [...prev, alertId]);
