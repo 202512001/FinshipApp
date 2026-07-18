@@ -12,11 +12,12 @@ import Modal from '../../../components/ui/Modal';
 import AppLogo from '../../../components/ui/AppLogo';
 import { type Alert } from '../../../lib/mockData';
 import { getCommunityRecordsByGender } from '../../../lib/services/community';
-import { getApprovedProfilesByGender, deleteMyAccount, saveFcmToken } from '../../../lib/services/profile';
+import { getApprovedProfilesByGender, deleteMyAccount, saveFcmToken, changePIN } from '../../../lib/services/profile';
 import { acknowledgeAlert, createAlert, getAlertHistory, getAvailabilityExpiresAt, subscribeToNewAvailabilityAlerts, updateAlertStatus, getAcceptedMembers, formGroup, getGroupWithMembers, getMyActiveGroup, subscribeToGroupFormed, sendPushNotificationsToArea } from '../../../lib/services/alerts';
 import GroupSuggestions from './GroupSuggestions';
 import NotificationFeed from './NotificationFeed';
 import { requestNotificationPermission, onForegroundMessage } from '../../../lib/firebase';
+
 
 const ALERT_DURATION_SECONDS = 3 * 60;
 
@@ -83,6 +84,11 @@ export default function MemberHomeClient() {
   const currentMemberRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const handleGroupFormedRef = useRef<any>(null);
+  const [showChangePIN, setShowChangePIN] = useState(false);
+  const [changePINLoading, setChangePINLoading] = useState(false);
+  const changePINForm = useForm<{ oldPin: string; newPin: string; confirmPin: string }>();
+
+
 // DERIVED
   const incomingAlert = currentMember
     ? alerts.find((a) => a.status === 'active' && a.senderId !== currentMember.id && a.gender === currentMember.gender)
@@ -160,7 +166,23 @@ useEffect(() => { setMounted(true); }, []);
     if (typeof window === 'undefined') return;
     const storedUser = localStorage.getItem('cv_user');
     if (!storedUser) { router.replace('/sign-up-login-screen'); return; }
-    setCurrentMember(JSON.parse(storedUser));
+    const parsed = JSON.parse(storedUser);
+  
+  // Verify user is still approved in DB
+  supabase
+    .from('profiles')
+    .select('status')
+    .eq('id', parsed.id)
+    .single()
+    .then(({ data }) => {
+      if (!data || data.status !== 'approved') {
+        localStorage.removeItem('cv_user');
+        localStorage.removeItem('cv_admin');
+        router.replace('/sign-up-login-screen');
+        return;
+      }
+      setCurrentMember(parsed);
+    });
   }, [router]);
 
   useEffect(() => { currentMemberRef.current = currentMember; }, [currentMember]);
@@ -496,6 +518,33 @@ const handleSendAlert = async () => {
 
   if (!mounted || !currentMember) return null;
 
+  const handleChangePIN = changePINForm.handleSubmit(async (data) => {
+  if (data.newPin !== data.confirmPin) {
+    changePINForm.setError('confirmPin', { message: 'PINs do not match' });
+    return;
+  }
+  if (data.newPin.length !== 4 || !/^\d{4}$/.test(data.newPin)) {
+    changePINForm.setError('newPin', { message: 'PIN must be exactly 4 digits' });
+    return;
+  }
+  setChangePINLoading(true);
+  try {
+    const result = await changePIN(currentMember.id, data.oldPin, data.newPin);
+    if (!result.success) {
+      changePINForm.setError('oldPin', { message: result.message });
+      return;
+    }
+    toast.success('PIN changed successfully!');
+    setShowChangePIN(false);
+    setLogoutModal(false);
+    changePINForm.reset();
+  } catch {
+    toast.error('Failed to change PIN. Try again.');
+  } finally {
+    setChangePINLoading(false);
+  }
+});
+
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-lg mx-auto">
       {/* Top Header */}
@@ -820,43 +869,59 @@ const handleSendAlert = async () => {
       </nav>
 
       {/* Logout Modal */}
-      <Modal open={logoutModal} onClose={() => setLogoutModal(false)} title="Sign Out">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to sign out? You will need to sign in again to receive alerts.
-          </p>
-          <div className="flex gap-2">
-            <button
+   <Modal open={logoutModal} onClose={() => setLogoutModal(false)} title="Profile">
+  <div className="space-y-3">
+    <div className="bg-secondary rounded-xl p-4 mb-2">
+      <p className="font-semibold text-foreground">{currentMember.name}</p>
+      <p className="text-sm text-muted-foreground">{currentMember.gender} · {currentMember.society}</p>
+      <p className="text-xs text-muted-foreground mt-1">{currentMember.area}</p>
+    </div>
+
+    <button
+      onClick={() => setShowChangePIN(true)}
+      className="w-full py-2.5 bg-secondary text-foreground rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-muted transition-colors"
+    >
+       Change PIN
+    </button>
+
+    <button
+      onClick={() => {
+        localStorage.removeItem('cv_user');
+        localStorage.removeItem('cv_admin');
+        setLogoutModal(false);
+        router.replace('/sign-up-login-screen');
+      }}
+      className="w-full py-2.5 bg-destructive text-destructive-foreground rounded-xl text-sm font-semibold hover:bg-destructive/90 active:scale-95 transition-all"
+    >
+      Sign Out
+    </button>
+
+    <button
   onClick={async () => {
     if (confirm('This will permanently delete your account. Are you sure?')) {
-      await deleteMyAccount(currentMember.id);
-      router.push('/');
+      try {
+        await deleteMyAccount(currentMember.id);
+        toast.success('Account deleted.');
+        router.replace('/sign-up-login-screen');
+      } catch {
+        toast.error('Failed to delete account. Try again.');
+      }
     }
   }}
-  className="w-full py-2.5 bg-destructive/10 text-destructive rounded-xl text-sm font-semibold mt-2"
+  className="w-full py-2.5 bg-destructive/10 text-destructive rounded-xl text-sm font-semibold"
 >
   Delete My Account
 </button>
-            <button
-              onClick={() => {
-  localStorage.removeItem('cv_user');
-  localStorage.removeItem('cv_admin');
-  setLogoutModal(false);
-  router.replace('/sign-up-login-screen');
-}}
-              className="flex-1 py-2.5 bg-destructive text-destructive-foreground rounded-xl text-sm font-semibold hover:bg-destructive/90 active:scale-95 transition-all"
-            >
-              Sign Out
-            </button>
-            <button
-              onClick={() => setLogoutModal(false)}
-              className="flex-1 py-2.5 bg-muted text-foreground rounded-xl text-sm font-semibold hover:bg-muted/70 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
+
+    <button
+      onClick={() => setLogoutModal(false)}
+      className="w-full py-2.5 bg-muted text-foreground rounded-xl text-sm font-semibold"
+    >
+      Cancel
+    </button>
+  </div>
+</Modal>
+
       {/* Group Formed Popup */}
 {groupPopupVisible && (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -946,6 +1011,80 @@ const handleSendAlert = async () => {
     
   </form>
 </Modal>
+{/* Change PIN Modal */}
+<Modal
+  open={showChangePIN}
+  onClose={() => { setShowChangePIN(false); changePINForm.reset(); }}
+  title="Change PIN"
+>
+  <form onSubmit={handleChangePIN} className="space-y-4">
+    <div>
+      <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+        Current PIN
+      </label>
+      <input
+        type="password"
+        maxLength={4}
+        placeholder="Enter current 4-digit PIN"
+        {...changePINForm.register('oldPin', { required: 'Current PIN is required' })}
+        className="w-full px-3 py-2.5 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      {changePINForm.formState.errors.oldPin && (
+        <p className="mt-1 text-xs text-destructive">{changePINForm.formState.errors.oldPin.message}</p>
+      )}
+    </div>
+
+    <div>
+      <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+        New PIN
+      </label>
+      <input
+        type="password"
+        maxLength={4}
+        placeholder="Enter new 4-digit PIN"
+        {...changePINForm.register('newPin', { required: 'New PIN is required' })}
+        className="w-full px-3 py-2.5 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      {changePINForm.formState.errors.newPin && (
+        <p className="mt-1 text-xs text-destructive">{changePINForm.formState.errors.newPin.message}</p>
+      )}
+    </div>
+
+    <div>
+      <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+        Confirm New PIN
+      </label>
+      <input
+        type="password"
+        maxLength={4}
+        placeholder="Confirm new 4-digit PIN"
+        {...changePINForm.register('confirmPin', { required: 'Please confirm your PIN' })}
+        className="w-full px-3 py-2.5 bg-input border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      {changePINForm.formState.errors.confirmPin && (
+        <p className="mt-1 text-xs text-destructive">{changePINForm.formState.errors.confirmPin.message}</p>
+      )}
+    </div>
+
+    <div className="flex gap-2">
+      <button
+        type="submit"
+        disabled={changePINLoading}
+        className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 active:scale-95 transition-all disabled:opacity-60"
+      >
+        {changePINLoading ? 'Updating...' : 'Update PIN'}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setShowChangePIN(false); changePINForm.reset(); }}
+        className="flex-1 py-2.5 bg-muted text-foreground rounded-xl text-sm font-semibold"
+      >
+        Cancel
+      </button>
+    </div>
+  </form>
+</Modal>
+
     </div>
   );
 }

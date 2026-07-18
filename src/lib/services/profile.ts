@@ -42,12 +42,10 @@ if (!allowed) {
 }
 
 export async function loginUser(mobile: string, pin: string) {
-  // Use server-side PIN verification — never compare plaintext
   const { data: userId, error } = await supabase
     .rpc('verify_pin', { mobile_number: mobile, plain_pin: pin });
 
   if (error || !userId) {
-    // Check if user exists but is pending
     const { data: pending } = await supabase
       .from('profiles')
       .select('status')
@@ -57,18 +55,22 @@ export async function loginUser(mobile: string, pin: string) {
     if (!pending) return { status: 'not_found', user: null };
     if (pending.status === 'pending') return { status: 'pending', user: null };
     if (pending.status === 'blocked') return { status: 'blocked', user: null };
+    if (pending.status === 'deleted') return { status: 'deleted', user: null };
     return { status: 'not_found', user: null };
   }
 
-  // Fetch user profile without PIN field
+  // Check if deleted
   const { data: user } = await supabase
     .from('profiles')
     .select('id, name, mobile, gender, area_id, society, house_no, role, status, admin_type, areas(name)')
     .eq('id', userId)
     .single();
 
+  if (!user || user.status === 'deleted') return { status: 'deleted', user: null };
+
   return { status: 'approved', user };
 }
+
 export async function getAreas() {
   const { data, error } = await supabase
     .from("areas")
@@ -159,25 +161,16 @@ export async function getApprovedProfilesByGender(gender: "Male" | "Female") {
 }
 
 export async function deleteMyAccount(profileId: string) {
-  // Anonymize instead of hard delete to preserve visit history integrity
   const { error } = await supabase
-    .from('profiles')
-    .update({
-      name: 'Deleted User',
-      mobile: `deleted_${profileId.slice(0, 8)}`,
-      house_no: null,
-      society: null,
-      status: 'blocked',
-      pin: 'deleted',
-    })
-    .eq('id', profileId);
+    .rpc('delete_member_account', { profile_id: profileId });
 
   if (error) throw error;
 
-  // Clear localStorage
+  // Clear all local storage
   localStorage.removeItem('cv_user');
   localStorage.removeItem('cv_admin');
 }
+
 
 export async function saveFcmToken(profileId: string, token: string) {
   const { error } = await supabase
@@ -186,4 +179,40 @@ export async function saveFcmToken(profileId: string, token: string) {
     .eq('id', profileId);
 
   if (error) throw error;
+}
+
+export async function changePIN(profileId: string, oldPin: string, newPin: string): Promise<{ success: boolean; message: string }> {
+  // Verify old PIN using the existing verify_pin function
+  const { data: userId, error } = await supabase
+    .rpc('verify_pin', { mobile_number: '', plain_pin: oldPin });
+
+  // verify_pin needs mobile — use direct check instead
+  const { data: profile, error: fetchError } = await supabase
+    .from('profiles')
+    .select('pin')
+    .eq('id', profileId)
+    .single();
+
+  if (fetchError || !profile) return { success: false, message: 'Profile not found' };
+
+  // Verify old PIN against stored hash
+  const { data: isValid, error: verifyError } = await supabase
+    .rpc('verify_pin_by_id', { profile_id: profileId, plain_pin: oldPin });
+
+  if (verifyError || !isValid) return { success: false, message: 'Current PIN is incorrect' };
+
+  // Hash and save new PIN
+  const { data: hashedPin, error: hashError } = await supabase
+    .rpc('hash_pin', { plain_pin: newPin });
+
+  if (hashError || !hashedPin) return { success: false, message: 'Failed to update PIN' };
+
+  const { error: updateError } = await supabase
+    .from('profiles')
+    .update({ pin: hashedPin })
+    .eq('id', profileId);
+
+  if (updateError) return { success: false, message: 'Failed to update PIN' };
+
+  return { success: true, message: 'PIN updated successfully' };
 }
